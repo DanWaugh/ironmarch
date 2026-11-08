@@ -1,0 +1,10 @@
+# Pinned versions for Python work with the anonymised data in data/
+# (networkx, pandas, matplotlib, python-louvain, jupyterlab).
+# Verified installing together (Python 3.12, November 2026).
+# Install with: pip install -r requirements.txt
+networkx==3.7
+pandas==3.1.1
+numpy==2.5.4
+matplotlib==3.11.2
+python-louvain==0.16
+jupyterlab==4.6.6

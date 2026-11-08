@@ -1,0 +1,5 @@
+salt.txt
+__pycache__/
+raw/
+.Rhistory
+.DS_Store

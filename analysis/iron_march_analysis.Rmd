@@ -1,0 +1,4784 @@
+---
+title: "Iron March"
+author: "Daniel Waugh"
+date: "10/8/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+Data Science - TU060
+Daniel Waugh
+
+```{r}
+
+# Update packages to ensure code runs correctly 
+# update.packages(ask = FALSE)
+
+## Pre loading library packages
+library(ggpubr)
+library(dplyr)
+library(car) 
+library(psych) 
+library(gmodels)
+library(tidyverse)
+library(anytime)
+library(sqldf)
+library(lubridate)
+
+# graphs
+library(ggplot2)
+library(tidyverse)
+library(hrbrthemes)
+library(igraph)
+
+```
+
+#Loading Data
+```{r}
+#code for reading csv files locally
+#Iron March
+iron_march_core_members <-read.csv("core_members.csv", sep=',', header =TRUE) # Member Info
+iron_march_core_message_posts <-read.csv("core_message_posts.csv", sep=',', header =TRUE) # Text of messages, replies to Private Messages
+iron_march_core_message_topics <- read.csv("core_message_topics.csv", sep =',', header = TRUE) # Private Messages
+iron_march_core_forum_posts <- read.csv("core_search_index.csv", sep =',', header = TRUE) # Posts and comments
+```
+
+# ----> DATA PRE PROCESSING <---------
+
+# Posts/Topics
+
+# Adding all titles to Posts/Topics in the dataset
+```{r}
+table(iron_march_core_forum_posts$index_class)
+
+iron_march_core_forum_posts_ids <- 
+sqldf("SELECT DISTINCT index_item_id, index_title
+FROM iron_march_core_forum_posts 
+where 
+[index_class] = 'IPS\\forums\\Topic\\Post' AND
+[index_title] != ' '
+ORDER BY index_item_id")
+
+iron_march_core_forum_posts_ids[iron_march_core_forum_posts_ids==""]<-NA # Change duplicates with empty cells to NA
+iron_march_core_forum_posts_ids <- na.omit(iron_march_core_forum_posts_ids) # Remove the duplicates 
+
+iron_march_core_forum_posts$index_title <- iron_march_core_forum_posts_ids$index_title[match(iron_march_core_forum_posts$index_item_id, iron_march_core_forum_posts_ids$index_item_id)]; # Match the ID to the title of the post in the original dataset
+
+#describe(iron_march_core_forum_posts) # Have I added more rows? No, same no. of rows
+
+#write.csv(iron_march_core_forum_posts_cleaned,"iron_march_core_forum_posts_cleaned.csv", row.names = FALSE)
+
+```
+
+#DATES AND TIMES
+
+##Convert timestamps Epoch to POSIXct - https://statisticsglobe.com/convert-unix-timestamp-to-date-object-in-r
+```{r}
+#Converting date columns
+iron_march_core_members$joined <- as.POSIXct(iron_march_core_members$joined, origin="1970-01-01", tz="GMT")
+iron_march_core_members$joined <- as.POSIXct(iron_march_core_members$joined, format="%Y-%m-%dT%H:%M")
+
+iron_march_core_members$last_visit <- as.POSIXct(iron_march_core_members$last_visit, origin="1970-01-01", tz="GMT")
+iron_march_core_members$last_visit <- as.POSIXct(iron_march_core_members$last_visit, format="%Y-%m-%dT%H:%M")
+
+iron_march_core_members$last_activity <- as.POSIXct(iron_march_core_members$last_activity, origin="1970-01-01", tz="GMT")
+iron_march_core_members$last_activity <- as.POSIXct(iron_march_core_members$last_activity, format="%Y-%m-%dT%H:%M")
+
+iron_march_core_message_posts$msg_date <- as.POSIXct(iron_march_core_message_posts$msg_date, origin="1970-01-01", tz="GMT")
+iron_march_core_message_posts$msg_date <- as.POSIXct(iron_march_core_message_posts$msg_date, format="%Y-%m-%dT%H:%M")
+
+iron_march_core_message_topics$mt_date <- as.POSIXct(iron_march_core_message_topics$mt_date, origin="1970-01-01", tz="GMT")
+iron_march_core_message_topics$mt_date <- as.POSIXct(iron_march_core_message_topics$mt_date, format="%Y-%m-%dT%H:%M")
+iron_march_core_message_topics$mt_start_time <- as.POSIXct(iron_march_core_message_topics$mt_date, origin="1970-01-01", tz="GMT")
+iron_march_core_message_topics$mt_start_time <- as.POSIXct(iron_march_core_message_topics$mt_start_time, format="%Y-%m-%dT%H:%M")
+iron_march_core_message_topics$mt_last_post_time <- as.POSIXct(iron_march_core_message_topics$mt_last_post_time, origin="1970-01-01", tz="GMT")
+iron_march_core_message_topics$mt_last_post_time <- as.POSIXct(iron_march_core_message_topics$mt_last_post_time, format="%Y-%m-%dT%H:%M")
+
+iron_march_core_forum_posts$index_date_created <- as.POSIXct(iron_march_core_forum_posts$index_date_created, origin="1970-01-01", tz="GMT")
+iron_march_core_forum_posts$index_date_created  <- as.POSIXct(iron_march_core_forum_posts$index_date_created , format="%Y-%m-%dT%H:%M")
+
+iron_march_core_forum_posts$index_date_updated <- as.POSIXct(iron_march_core_forum_posts$index_date_updated, origin="1970-01-01", tz="GMT")
+iron_march_core_forum_posts$index_date_updated <- as.POSIXct(iron_march_core_forum_posts$index_date_updated, format="%Y-%m-%dT%H:%M")
+
+```
+
+##Convert POSIXct to Date + Split into D/M/Y, halfs, 
+```{r}
+# Confirm class is POSIXct
+class(iron_march_core_members$joined) 
+class(iron_march_core_members$last_visit) 
+class(iron_march_core_members$last_activity) 
+class(iron_march_core_message_posts$msg_date) 
+class(iron_march_core_forum_posts$index_date_created) 
+class(iron_march_core_forum_posts$index_date_updated) 
+class(iron_march_core_message_topics$mt_date) 
+
+# Dropping times and converting class to Date
+# iron_march_core_members$joined  <- as.Date(iron_march_core_members$joined) 
+# iron_march_core_members$last_visit  <- as.Date(iron_march_core_members$last_visit) 
+# iron_march_core_members$last_activity  <- as.Date(iron_march_core_members$last_activity) 
+# iron_march_core_message_posts$msg_date  <- as.Date(iron_march_core_message_posts$msg_date) 
+# iron_march_core_message_topics$mt_date  <- as.Date(iron_march_core_message_topics$mt_date) 
+# iron_march_core_forum_posts$index_date_created  <- as.Date(iron_march_core_forum_posts$index_date_created) 
+# iron_march_core_forum_posts$index_date_updated  <- as.Date(iron_march_core_forum_posts$index_date_updated) 
+
+# Adding halfs
+iron_march_core_members$joined_half  <- semester(iron_march_core_members$joined, with_year = TRUE)
+iron_march_core_members$last_visit_half  <- semester(iron_march_core_members$last_visit, with_year = TRUE)
+iron_march_core_members$last_activity_half  <- semester(iron_march_core_members$last_activity, with_year = TRUE)
+iron_march_core_message_posts$msg_date_half  <- semester(iron_march_core_message_posts$msg_date, with_year = TRUE)
+iron_march_core_message_topics$mt_date_half  <- semester(iron_march_core_message_topics$mt_date, with_year = TRUE)
+iron_march_core_forum_posts$index_date_created_half  <- semester(iron_march_core_forum_posts$index_date_created, with_year = TRUE)
+iron_march_core_forum_posts$index_date_updated_half  <- semester(iron_march_core_forum_posts$index_date_updated, with_year = TRUE) 
+iron_march_core_message_topics$mt_start_time  <- semester(iron_march_core_message_topics$mt_start_time, with_year =TRUE)
+iron_march_core_message_topics$mt_last_post_time <-  semester(iron_march_core_message_topics$mt_last_post_time, with_year =TRUE)
+
+# Check class is now Date
+#class(iron_march_core_members$joined) 
+#class(iron_march_core_members$last_visit) 
+#class(iron_march_core_members$last_activity) 
+#class(iron_march_core_message_posts$msg_date) 
+#class(iron_march_core_message_topics$mt_date) 
+#class(iron_march_core_forum_posts$index_date_created)
+#class(iron_march_core_forum_posts$index_date_updated)
+```
+
+### USERS INFO 
+Looking at messages and message topics to identify instances of data that needs removal.
+
+#Messages from users
+No need for much pre-processing 
+```{r}
+#Min member_id assigned to a user with an account is 1
+#describe(iron_march_core_members$member_id) 
+
+#Min msg_topic_id assigned to a thread is 1
+#describe(iron_march_core_message_posts$msg_topic_id) 
+
+#21715 messages
+#describe(iron_march_core_message_posts) #msg_author_id has a min of 0, which isn't possible. This should be an NA and be removed
+#table(is.na(iron_march_core_message_posts$msg_author_id)) #NAs = none
+
+#msg_author_id of 0 is not a member so this is an error
+iron_march_core_message_posts <- iron_march_core_message_posts[iron_march_core_message_posts$msg_author_id != 0, ]
+
+#20514 messages left when I exclude 0 from dataset
+#msg_post | sd = 10078.0, median = 10078.0, min = 1, max = 20159, kurtosis = -1.21, se = 40.75
+#describe(iron_march_core_message_posts)
+
+```
+#Messages Frequency
+```{r}
+colnames(iron_march_core_message_posts)
+
+#iron_march_core_message_posts %>%
+ # group_by(year) %>%
+  #summarise(n = n()) %>%
+  #mutate(Freq = n/sum(n))
+
+#year n Freq
+#2011	255	0.01243054		
+#2012	2842	0.13853953		
+#2013	2061	0.10046797		
+#2014	1850	0.09018231		
+#2015	3714	0.18104709		
+#2016	5093	0.24826947		
+#2017	4699	0.22906308	
+
+iron_march_core_message_posts %>%
+  group_by(msg_date_half) %>%
+  summarise(n = n()) %>%
+  mutate(Freq = round(n/sum(n)*100, digits = 2))
+
+#half    n   Freq
+#2011.2	262	1.21		
+#2012.1	1076	4.96		
+#2012.2	2211	10.18		
+#2013.1	1220	5.62		
+#2013.2	1169	5.38		
+#2014.1	1271	5.85		
+#2014.2	857	3.95		
+#2015.1	2051	9.45		
+#2015.2	1735	7.99		
+#2016.1	2735	12.59
+
+```
+
+# Message Topics
+
+```{r}
+#colnames(iron_march_core_message_topics)
+
+#4475 topics
+#describe(iron_march_core_message_topics) #msg_author_id has a min of 0, which isn't possible. This should be an NA and be removed
+#table(is.na(iron_march_core_message_topics$mt_starter_id)) #NAs = none
+#table(is.na(iron_march_core_message_topics$mt_to_member_id)) #NAs = none
+
+#mt_starter_id & mt_to_member_id of 0 is not a member so this is an error
+#iron_march_core_message_topics <- iron_march_core_message_topics[!(iron_march_core_message_topics$mt_starter_id== 0 | iron_march_core_message_topics$mt_to_member_id== 0),]
+
+#1962 topics
+#describe(iron_march_core_message_topics) #msg_author_id has a min of 0, which isn't possible. This should be an NA and be removed
+
+```
+
+#Posts/Topics Frequency
+
+```{r}
+colnames(iron_march_core_forum_posts)
+
+# Half
+iron_march_core_forum_posts %>%
+  group_by(index_date_created_half) %>%
+  summarise(n = n()) %>%
+    mutate(Freq = round(n/sum(n)*100, digits = 2))
+
+#index_date_created_half n freq
+
+# 2011.2	5686	2.90		
+# 2012.1	18444	9.41		
+# 2012.2	18934	9.66		
+# 2013.1	12866	6.56		
+# 2013.2	12686	6.47		
+# 2014.1	12500	6.38		
+# 2014.2	12100	6.17		
+# 2015.1	17885	9.12		
+# 2015.2	19631	10.01	 	
+# 2016.1	18824	9.60	
+
+```
+
+#YEARS JOINED AND ACTIVE USERS
+
+```{r}
+
+#describe(iron_march_core_members) #1207 members
+
+library(psych)
+
+#Half Joined
+iron_march_core_members %>%
+  group_by(joined_half) %>%
+  summarise(n = n()) %>%
+  mutate(Freq = round(n/sum(n)*100, digits = 2))
+
+# Half n freq%
+# 2011.2	40	3.31		
+# 2012.1	41	3.40		
+# 2012.2	53	4.39		
+# 2013.1	47	3.89		
+# 2013.2	39	3.23		
+# 2014.1	35	2.90		
+# 2014.2	37	3.07		
+# 2015.1	52	4.31		
+# 2015.2	51	4.23		
+# 2016.1	106	8.78		
+# 2016.2	219	18.14		
+# 2017.1	303	25.10		
+# 2017.2	184	15.24	
+
+#Years Active
+#iron_march_core_members %>%
+ # group_by(year_activity) %>%
+  #summarise(n = n()) %>%
+   # mutate(Freq = round(n/sum(n)*100, digits = 2))
+
+#year_activity n Freq
+#2011	2	  0.001657001		
+#2012	32	0.026512013		
+#2013	66	0.054681027		
+#2014	51	0.042253521		
+#2015	49	0.040596520		
+#2016	179	0.148301574		
+#2017	828	0.685998343	
+
+#n_distinct(iron_march_core_members$year_activity) # 7 distinct years
+#table(is.na(iron_march_core_members$year_activity)) #NAs = none
+```
+
+#YEARS JOINED AND ACTIVE USERS
+
+https://www.statology.org/r-remove-rows-from-data-frame-condition/
+
+https://www.marsja.se/how-to-remove-delete-row-in-r-with-na-with-conditions-duplicated/
+
+```{r}
+#Assessing inactive users based on: year joined and last activity + messages or posts made 
+#what if a user was very active in one year and was arrested?
+#Consider x2 below median for posting to be a cut off for inactive users on forum?
+
+colnames(iron_march_core_members)
+
+library(dplyr)
+library(sqldf)
+
+iron_march_inactive_users <- 
+sqldf("SELECT member_id, name, joined_half, last_activity_half, msg_count_total, member_posts
+FROM iron_march_core_members 
+where (
+[last_activity_half] == '2011.1' AND
+[joined_half] == '2011.1' OR
+[last_activity_half] == '2011.2' AND
+[joined_half] == '2011.2' OR
+[last_activity_half] == '2012.1' AND
+[joined_half] == '2012.1' OR
+[last_activity_half] == '2012.2' AND
+[joined_half] == '2012.2' OR
+[last_activity_half] == '2013.1' AND
+[joined_half] == '2013.1' OR
+[last_activity_half] == '2013.2' AND
+[joined_half] == '2013.2' OR
+[last_activity_half] == '2014.1' AND
+[joined_half] == '2014.1' OR
+[last_activity_half] == '2014.2' AND
+[joined_half] == '2014.2' OR
+[last_activity_half] == '2015.1' AND
+[joined_half] == '2015.1' OR
+[last_activity_half] == '2015.2' AND
+[joined_half] == '2015.2' OR
+[last_activity_half] == '2016.1' AND
+[joined_half] == '2016.1' OR
+[last_activity_half] == '2016.2' AND
+[joined_half] == '2016.2' OR
+[last_activity_half] == '2017.1' AND
+[joined_half] == '2017.1' OR
+[last_activity_half] == '2017.2' AND
+[joined_half] == '2017.2'
+) 
+AND 
+
+[msg_count_total] < 1 
+AND [member_posts] < 1
+
+ORDER BY joined_half")
+
+iron_march_inactive_users
+
+#[msg_count_total] < 1 AND [member_posts] < 1 = 35 users
+
+```
+
+```{r}
+#Remove users who are inactive before 2015 - 3 years of the forum's lifespan
+
+#iron_march_core_members_active <- iron_march_core_members[iron_march_core_members$msg_count_total > 1, ] #users who have never posted
+#iron_march_core_members_active <- iron_march_core_members[iron_march_core_members$year_activity > 2014, ]
+
+#Remove users who join and become inactive in the same year
+#Not removing users who do not post or messages 
+#These users can still lurk and consume content
+
+#describe(iron_march_core_members) #1207 members
+
+#iron_march_core_members_active <- iron_march_core_members[!(iron_march_core_members$year_activity == 2011 & #(iron_march_core_members$year_joined  == 2011)),] #1205 members
+
+#iron_march_core_members_active <- iron_march_core_members_active[!(iron_march_core_members_active$year_activity == 2012 & (iron_march_core_members_active$year_joined  == 2012 )),] #1179 members
+
+#iron_march_core_members_active <- iron_march_core_members_active[!(iron_march_core_members_active$year_activity == 2013 & (iron_march_core_members_active$year_joined  == 2013 )),] #1136 members
+
+#iron_march_core_members_active <- iron_march_core_members_active[!(iron_march_core_members_active$year_activity == 2014 & (iron_march_core_members_active$year_joined  == 2014 )),] #1103 members
+
+#table(iron_march_core_members_active$year_joined)
+
+#2011 removal
+#2011 2012 2013 2014 2015 2016 2017 
+#  38   94   86   72  103  325  487 
+
+#2012 removal
+#2011 2012 2013 2014 2015 2016 2017 
+# 38   68   86   72  103  325  487 
+
+#2013 removal
+#2011 2012 2013 2014 2015 2016 2017 
+# 38   68   43   72  103  325  487 
+
+#2014 removal
+#2011 2012 2013 2014 2015 2016 2017 
+# 38   68   43   39  103  325  487 
+
+#describe(iron_march_core_members_active) #1207 members -> 1056 members
+
+```
+
+### MESSAGE REVIEW - LABELLING AND IDENTIFYING USERS BASED ON KEYWORDS
+
+##Cleaning up text in messages, posts and topic titles
+```{r}
+## Remove formatting clutter from text in messages
+#tibble(iron_march_core_message_posts$msg_post) #check for code in text
+
+iron_march_core_message_posts$msg_post<-gsub("</p>","", as.character(iron_march_core_message_posts$msg_post))
+iron_march_core_message_posts$msg_post<-gsub("<p>","", as.character(iron_march_core_message_posts$msg_post))
+iron_march_core_message_posts$msg_post<-gsub("\n","", as.character(iron_march_core_message_posts$msg_post))
+iron_march_core_message_posts$msg_post<-gsub("\t","", as.character(iron_march_core_message_posts$msg_post))
+
+## Remove formatting clutter from text in topic titles
+
+#tibble(iron_march_core_message_topics$mt_title) #chck for code in topic titles / none found!
+#tibble(iron_march_core_message_topics)
+
+## Remove formatting clutter from text in posts
+
+iron_march_core_forum_posts$index_content<-gsub("</p>","", as.character(iron_march_core_forum_posts$index_content))
+iron_march_core_forum_posts$index_content<-gsub("<p>","", as.character(iron_march_core_forum_posts$index_content))
+iron_march_core_forum_posts$index_content<-gsub("\n","", as.character(iron_march_core_forum_posts$index_content))
+iron_march_core_forum_posts$index_content<-gsub("\t","", as.character(iron_march_core_forum_posts$index_content))
+
+#tibble(iron_march_core_forum_posts$index_content) #chck for code in topic titles / none found!
+
+```
+
+#Adding names to message and topic datasets
+Creating message and topic dataframes joined with core_members:
+
+iron_march_core_message_posts_names
+iron_march_core_message_topics_names
+
+```{r}
+
+#Messages
+
+colnames(iron_march_core_members)
+
+iron_march_core_members_ids <- 
+sqldf("SELECT DISTINCT member_id, name
+FROM iron_march_core_members 
+")
+
+#colnames(iron_march_core_message_posts)
+
+iron_march_core_message_posts_names1 <- iron_march_core_message_posts # New Dataframe
+iron_march_core_message_posts_names1$msg_author_name <- NA # Add column to fill later
+
+#colnames(iron_march_core_message_posts_names1)
+
+names(iron_march_core_message_posts_names1)[names(iron_march_core_message_posts_names1) == "msg_author_id"] <- "member_id" #match core_members
+names(iron_march_core_members_ids)[names(iron_march_core_members_ids) == "name"] <- "msg_author_name" #match posts dataframe
+
+#colnames(iron_march_core_message_posts_names1) # check change worked
+#colnames(iron_march_core_members_ids)  # check change worked
+
+iron_march_core_message_posts_names1$msg_author_name <- iron_march_core_members_ids$msg_author_name[match(iron_march_core_message_posts_names1$member_id, iron_march_core_members_ids$member_id)]; # Match the ID to the title of the post in the original dataset
+#head(iron_march_core_message_posts_names1)
+
+```
+
+```{r}
+#Posts
+
+# iron_march_core_members_ids
+# index_author_name = author of the reply or comment on a Post/Topic
+
+iron_march_core_forum_posts_names1 <- iron_march_core_forum_posts
+
+colnames(iron_march_core_forum_posts) #confirm change
+
+iron_march_core_forum_posts_names1$index_author_name <- NA # Add column to fill later
+
+names(iron_march_core_forum_posts_names1)[names(iron_march_core_forum_posts_names1) == "index_author"] <- "member_id" #match core_members
+names(iron_march_core_members_ids)[names(iron_march_core_members_ids) == "msg_author_name"] <- "index_author_name" #match posts dataframe
+
+iron_march_core_forum_posts_names1$index_author_name <- iron_march_core_members_ids$index_author_name[match(iron_march_core_forum_posts_names1$member_id, iron_march_core_members_ids$member_id)]; # Match the ID to the title of the post in the original dataset
+
+names(iron_march_core_forum_posts_names1)[names(iron_march_core_forum_posts_names1) == "member_id"] <- "index_author" #revert back
+
+# index_item_author = author of the Post/Topic itself
+
+iron_march_core_forum_posts_names1$index_item_author_name <- NA # Add column to fill later
+
+names(iron_march_core_forum_posts_names1)[names(iron_march_core_forum_posts_names1) == "index_item_author"] <- "member_id" #match core_members
+names(iron_march_core_members_ids)[names(iron_march_core_members_ids) == "index_author_name"] <- "index_item_author_name" #match posts dataframe
+
+iron_march_core_forum_posts_names1$index_item_author_name <- iron_march_core_members_ids$index_item_author_name[match(iron_march_core_forum_posts_names1$member_id, iron_march_core_members_ids$member_id)]; # Match the ID to the title of the post in the original dataset
+
+names(iron_march_core_forum_posts_names1)[names(iron_march_core_forum_posts_names1) == "member_id"] <- "index_item_author"  #revert back
+names(iron_march_core_members_ids)[names(iron_march_core_members_ids) == "index_item_author_name"] <- "name"  #revert back
+
+```
+
+#Private Messages
+
+```{r}
+
+# iron_march_core_members_ids
+# iron_march_core_message_topics
+
+# mt_starter_id = author of first private message (outdegree)
+# mt_to_member_id = receiver of the message (indegree)
+
+iron_march_core_message_topics_names1 <- iron_march_core_message_topics
+
+iron_march_core_message_topics_names1$mt_start_name <- NA # Add column to fill later
+iron_march_core_message_topics_names1$mt_to_member_name <- NA # Add column to fill later
+
+# mt_starter_id
+names(iron_march_core_message_topics_names1)[names(iron_march_core_message_topics_names1) == "mt_starter_id"] <- "member_id" #match core_members
+names(iron_march_core_members_ids)[names(iron_march_core_members_ids) == "name"] <- "mt_start_name" #match posts dataframe
+
+iron_march_core_message_topics_names1$mt_start_name <- iron_march_core_members_ids$mt_start_name[match(iron_march_core_message_topics_names1$member_id, iron_march_core_members_ids$member_id)]; # Match the ID to the title of the post in the original dataset
+
+names(iron_march_core_message_topics_names1)[names(iron_march_core_message_topics_names1) == "member_id"] <- "mt_starter_id" #revert back
+names(iron_march_core_members_ids)[names(iron_march_core_members_ids) == "mt_start_name"] <- "mt_to_member_name" #match next dataframe
+
+# head(iron_march_core_message_topics_names1)
+
+#1005 0s
+sqldf("SELECT count(mt_starter_id)
+FROM iron_march_core_message_topics_names1
+WHERE [mt_starter_id] == '0'")
+
+sqldf("SELECT count(mt_to_member_name)
+FROM iron_march_core_message_topics_names1
+WHERE [mt_to_member_name] == '0'")
+
+```
+
+```{r}
+# mt_to_member_id 
+names(iron_march_core_message_topics_names1)[names(iron_march_core_message_topics_names1) == "mt_to_member_id"] <- "member_id" #match core_member
+
+iron_march_core_message_topics_names1$mt_to_member_name <- iron_march_core_members_ids$mt_to_member_name[match(iron_march_core_message_topics_names1$member_id, iron_march_core_members_ids$member_id)]; # Match the ID to the title of the post in the original dataset
+
+names(iron_march_core_message_topics_names1)[names(iron_march_core_message_topics_names1) == "member_id"] <- "mt_to_member_id" #revert back
+names(iron_march_core_members_ids)[names(iron_march_core_members_ids) == "mt_to_member_name"] <- "name" #match next dataframe
+
+head(iron_march_core_message_topics_names1)
+
+```
+
+#Cleanup of datasets removing NAs
+```{r}
+#colnames(iron_march_core_message_posts_names)
+
+colnames(iron_march_core_message_posts_names1)
+
+#20514 messages 
+#describe(iron_march_core_message_posts_names1)
+table(is.na(iron_march_core_message_posts_names1$msg_author_name)) #FALSE = 19025 /  TRUE = 1489 NAs
+#iron_march_core_message_posts_names1 <- iron_march_core_message_posts_names1[!is.na(iron_march_core_message_posts_names1$msg_author_name), ]
+
+#19025 messages after removing messages without a recorded name associated with the member_id
+#describe(iron_march_core_message_posts_names1)
+
+#----------------------------------------------------------------------
+
+#1962 Posts/Topics 
+#describe(iron_march_core_message_topics_names1)
+table(is.na(iron_march_core_message_topics_names1$mt_start_name)) #FALSE = 1961 /  TRUE = 1 NAs
+table(is.na(iron_march_core_message_topics_names1$mt_to_member_name)) #FALSE = 1699 /  TRUE = 263 NAs
+
+iron_march_core_message_topics_names1 <- iron_march_core_message_topics_names1[!is.na(iron_march_core_message_topics_names1$mt_start_name), ]
+iron_march_core_message_topics_names1 <- iron_march_core_message_topics_names1[!is.na(iron_march_core_message_topics_names1$mt_to_member_name), ]
+
+#1699 Posts/Topics after removing topics without a recorded name associated with the mt_starter_name or mt_to_member_name
+describe(iron_march_core_message_topics_names1)
+
+#----------------------------------------------------------------------
+
+#182,829 posts 
+#describe(iron_march_core_forum_posts_names1)
+table(is.na(iron_march_core_forum_posts_names1$index_author_name)) #FALSE = 182829 
+table(is.na(iron_march_core_forum_posts_names1$index_item_author_name)) #FALSE = 164368 / TRUE = 18461
+
+iron_march_core_forum_posts_names1 <- iron_march_core_forum_posts_names1[!is.na(iron_march_core_forum_posts_names1$index_item_author_name), ]
+
+#iron_march_core_forum_posts_names <- iron_march_core_forum_posts_names[!is.na(iron_march_core_forum_posts_names$name), ]
+
+```
+
+# PRIVATE MESSAGE DATA PRE-PROCESS
+
+I need to merge these dataframes together so I can see who replies to who more easily vs replying to the message titles.
+
+```{r}
+
+# iron_march_core_message_topics = mt_id, mt_title, mt_starter_id, mt_to_member_id
+# iron_march_core_message_posts_names1 = msg_id, msg_topic_id, msg_date, msg_post, member_id, msg_is_first_post, msg_author_name
+
+iron_march_core_message_topics_prep <- iron_march_core_message_topics
+describe(iron_march_core_message_topics_prep) # 1962 threads without member_id 0 / 4475 threads with member_id 0
+describe(iron_march_core_message_posts_names1) # 19025 messages
+
+names(iron_march_core_message_topics_prep)[names(iron_march_core_message_topics_prep) == "mt_id"] <- "msg_topic_id" #join key
+
+iron_march_core_message_all <- iron_march_core_message_topics_prep  %>%  
+  right_join(iron_march_core_message_posts_names1, by = "msg_topic_id")
+
+tibble(iron_march_core_message_all)
+
+```
+
+```{r}
+# 19,025 messages/rows
+
+# Rows with matches between the sender and receiver
+# Receiver should be replaced with the mt_starter_id 
+
+# mt_starter_id = receiver
+# member_id = sender
+# 5,202
+iron_march_core_message_all1 <- 
+sqldf("SELECT msg_topic_id, mt_title, member_id, mt_starter_id, msg_id, msg_post, msg_date, msg_date_half
+FROM iron_march_core_message_all
+WHERE [member_id] == [mt_to_member_id]
+AND [msg_topic_id] == [msg_topic_id]
+ORDER BY msg_topic_id")
+
+# msg_topic_id, mt_date, mt_title, mt_starter_id, member_id, mt_last_post_time, mt_replies, mt_date_half, 
+#msg_id, msg_date, msg_post, msg_is_first_post, msg_date_half, msg_author_name
+
+# member_id  = sender
+# mt_to_member_id = receiver
+# 15,312 
+iron_march_core_message_all2 <- 
+sqldf("SELECT msg_topic_id, mt_title, member_id, mt_to_member_id, msg_id, msg_post, msg_date, msg_date_half
+FROM iron_march_core_message_all
+WHERE [member_id] != [mt_to_member_id]
+AND [msg_topic_id] == [msg_topic_id]
+ORDER BY msg_topic_id")
+
+sqldf("SELECT msg_topic_id, member_id, msg_post, msg_date, msg_date_half
+FROM iron_march_core_message_all
+WHERE [msg_topic_id] == 4486
+ORDER BY msg_topic_id")
+
+# msg_topic_id, mt_date, mt_title, member_id, mt_to_member_id, mt_last_post_time, mt_replies, mt_date_half, 
+# msg_id, msg_date, msg_post, msg_is_first_post, msg_date_half, msg_author_name
+
+names(iron_march_core_message_all1)[names(iron_march_core_message_all1) == "mt_starter_id"] <- "message_receiver_id" #join key
+names(iron_march_core_message_all1)[names(iron_march_core_message_all1) == "member_id"] <- "message_sender_id" #join key
+
+names(iron_march_core_message_all2)[names(iron_march_core_message_all2) == "mt_to_member_id"] <- "message_receiver_id" #join key
+names(iron_march_core_message_all2)[names(iron_march_core_message_all2) == "member_id"] <- "message_sender_id" #join key
+
+iron_march_core_message_all3 <- rbind(iron_march_core_message_all1, iron_march_core_message_all2) # bind all identified roles
+
+# This dataframe has all the sender and receivers for all private messages
+# Still has some 0s in the receiver column
+#iron_march_core_message_all3 
+
+write.csv(iron_march_core_message_all3,"iron_march_core_message_all3.csv", row.names = FALSE)
+
+# 9846 0s for message_receiver_id
+sqldf("SELECT count(message_receiver_id)
+FROM iron_march_core_message_all3
+WHERE [message_receiver_id] = '0'")
+
+sqldf("SELECT message_sender_id, message_receiver_id
+FROM iron_march_core_message_all3
+WHERE [msg_topic_id] = '32'")
+
+```
+
+```{r}
+# Finishing the receiver ID 
+# Selecting the instances where member_id is 0
+# Filtering by more than 2 posts, I cannot see replies so cannot identify a member_id
+
+#iron_march_core_message_all4 <- 
+#sqldf("SELECT msg_topic_id, mt_title, message_receiver_id, msg_id, msg_date, msg_date_half
+#FROM iron_march_core_message_all3
+#WHERE [message_receiver_id] =  0
+#AND [msg_topic_id] == [msg_topic_id]
+#ORDER BY msg_topic_id")
+
+# Need to split because matching IDs via msg_topic_id only works before 2016
+iron_march_core_message_all_before <- 
+sqldf("SELECT msg_topic_id, mt_title, message_sender_id, msg_id, msg_date, msg_date_half
+FROM iron_march_core_message_all3
+WHERE [message_receiver_id] =  0
+AND  ([msg_date_half] = '2015.1' 
+OR [msg_date_half] = '2015.2'
+OR [msg_date_half] = '2014.1'
+OR [msg_date_half] = '2014.2'
+OR [msg_date_half] = '2013.1'
+OR [msg_date_half] = '2013.2'
+OR [msg_date_half] = '2012.1'
+OR [msg_date_half] = '2012.2'
+OR [msg_date_half] = '2011.2')
+AND [msg_topic_id] == [msg_topic_id]
+ORDER BY msg_topic_id")
+
+sqldf("SELECT*
+FROM iron_march_core_message_all_before
+WHERE [msg_topic_id] = 180
+ORDER BY msg_topic_id")
+
+# Need to match via msg_id to work
+iron_march_core_message_all_after <- 
+sqldf("SELECT msg_topic_id, mt_title, message_sender_id, msg_id, msg_date, msg_date_half
+FROM iron_march_core_message_all3
+WHERE [message_receiver_id] =  0
+AND  ([msg_date_half] = '2016.1'
+OR [msg_date_half] = '2016.2'
+OR [msg_date_half] = '2017.1'
+OR [msg_date_half] = '2017.2')
+AND [msg_topic_id] == [msg_topic_id]
+ORDER BY msg_topic_id")
+
+sqldf("SELECT*
+FROM iron_march_core_message_all_after
+WHERE [msg_topic_id] = 4486
+ORDER BY msg_topic_id")
+
+#iron_march_core_message_all1 = message_receiver_id
+# Create data frame for ids
+iron_march_core_message_sender_ids_before <- select(iron_march_core_message_all2, msg_topic_id, message_sender_id)
+iron_march_core_message_sender_ids_after <- select(iron_march_core_message_all2, message_sender_id, msg_topic_id)
+
+# changes column from receiver to sender
+names(iron_march_core_message_sender_ids_before)[names(iron_march_core_message_sender_ids_before) == "message_sender_id"] <- "message_receiver_id" #match core_member
+names(iron_march_core_message_sender_ids_after)[names(iron_march_core_message_sender_ids_after) == "message_sender_id"] <- "message_receiver_id" #match core_member
+```
+
+```{r}
+# Match by topic id to replace member_id 0 with the real member_ids
+# needs to be 5 receiver ids for id 144 on msg topic 180 (140 sends 5 messages to 144)
+
+iron_march_core_message_all_before$message_receiver_id <- iron_march_core_message_sender_ids_before$message_receiver_id[match(iron_march_core_message_all_before$msg_topic_id, iron_march_core_message_sender_ids_before$msg_topic_id)]; 
+
+# I don't know why - but matching msg_topic_id doesn't work after 2016 (likely corruption in original CSV)
+iron_march_core_message_all_after$message_receiver_id <- iron_march_core_message_sender_ids_after$message_receiver_id[match(iron_march_core_message_all_after$msg_topic_id, iron_march_core_message_sender_ids_after$msg_topic_id)]; 
+
+tibble(iron_march_core_message_all_before)
+tibble(iron_march_core_message_all_after)
+
+sqldf("SELECT*
+FROM iron_march_core_message_all_after
+WHERE [msg_topic_id] = 4486
+ORDER BY msg_topic_id")
+
+iron_march_core_message_all4 <- union_all(iron_march_core_message_all_before, iron_march_core_message_all_after) %>%
+  arrange(msg_date)
+
+# iron_march_core_message_all4 is now the dataframe with all the ids 
+# There are 9846 ids matching the exact number of 0s
+```
+
+```{r}
+# iron_march_core_message_all4 = replacement for 0
+# iron_march_core_message_all3 = complete data frame with 0
+
+iron_march_core_message_all_master <- iron_march_core_message_all3 #20,514 rows in total
+iron_march_core_message_all_missing_ids <- iron_march_core_message_all4 # 9,846 rows
+
+# 10,668 rows
+iron_march_core_message_all_not_missing_ids <- 
+sqldf("SELECT msg_topic_id, mt_title, message_receiver_id, msg_id, msg_date, msg_date_half
+FROM iron_march_core_message_all_master
+WHERE [message_receiver_id] !=  0
+AND [msg_topic_id] == [msg_topic_id]
+ORDER BY msg_topic_id")
+
+# binding the two dataframes gives me the complete message_sender_id column
+# This has worked - I now have a completed sender column
+
+#iron_march_core_message_all_receiver_ids <- rbind(iron_march_core_message_all_not_missing_ids, iron_march_core_message_all_missing_ids, fill = FALSE) # bind all sender IDs
+
+library(dplyr)
+
+iron_march_core_message_all_receiver_ids <- union_all(iron_march_core_message_all_not_missing_ids, iron_march_core_message_all_missing_ids) %>%
+  arrange(msg_date)
+
+# confirmed message_receiver_id is completed
+# 3 x 140, 5 x 144
+sqldf("SELECT msg_topic_id, message_receiver_id, msg_date, msg_date_half
+FROM iron_march_core_message_all_receiver_ids
+WHERE [msg_topic_id] == 180
+ORDER BY msg_topic_id")
+
+# 2 x NAs
+sqldf("SELECT msg_topic_id, message_receiver_id, msg_date, msg_date_half
+FROM iron_march_core_message_all_receiver_ids
+WHERE [msg_topic_id] == 31
+ORDER BY msg_topic_id")
+
+# 2 x 40
+sqldf("SELECT msg_topic_id, message_receiver_id, msg_date, msg_date_half
+FROM iron_march_core_message_all_receiver_ids
+WHERE [msg_topic_id] == 32
+ORDER BY msg_topic_id")
+
+sqldf("SELECT*
+FROM iron_march_core_message_all_receiver_ids
+WHERE [msg_topic_id] = 4486
+ORDER BY msg_topic_id")
+```
+
+Final step in pre-processing the messages dataframes (iron_march_core_message_all_completed)
+
+```{r}
+
+iron_march_core_message_all_master_2 <- iron_march_core_message_all_master
+colnames(iron_march_core_message_all_master_2) #confirm change
+iron_march_core_message_all_master_2$message_receiver_id_2 <- NA # Add column to fill later
+names(iron_march_core_message_all_receiver_ids)[names(iron_march_core_message_all_receiver_ids) == "message_receiver_id"] <- "message_receiver_id_2" #match
+
+iron_march_core_message_all_master_2$message_receiver_id_2 <- iron_march_core_message_all_receiver_ids$message_receiver_id_2[match(iron_march_core_message_all_master_2$msg_date, iron_march_core_message_all_receiver_ids$msg_date)]; # Match the ID to the title of the post in the original dataset
+
+# check if 144 is in message_sender_id and not all 140
+# for some reason 144 is swapped with all 140s when I try and match IDs in code above
+sqldf("SELECT msg_topic_id, message_receiver_id_2
+FROM iron_march_core_message_all_master_2
+WHERE [msg_topic_id] == 180
+ORDER BY msg_topic_id")
+
+sqldf("SELECT msg_topic_id, message_receiver_id_2
+FROM iron_march_core_message_all_master_2
+WHERE [msg_topic_id] == 31
+ORDER BY msg_topic_id")
+
+iron_march_core_message_all_master_3 <- 
+sqldf("SELECT msg_topic_id, mt_title, message_sender_id, message_receiver_id_2, msg_id, msg_post, msg_date, msg_date_half
+FROM iron_march_core_message_all_master_2
+ORDER BY msg_topic_id")
+
+names(iron_march_core_message_all_master_3)[names(iron_march_core_message_all_master_3) == "message_receiver_id_2"] <- "message_receiver_id" #match posts dataframe
+
+iron_march_core_message_all_completed <- iron_march_core_message_all_master_3
+
+#write.csv(iron_march_core_message_all_completed,"iron_march_core_message_all_completed.csv", row.names = FALSE)
+```
+
+# Issue with every row after thread 4445 where sender == receiver 
+8997 rows matching with msg_id match
+5055 rows matching with msg_topic_id match
+Big issues for 2016 onwards - loss of a lot of data
+
+```{r}
+
+sqldf("SELECT msg_date_half,
+COUNT(msg_date_half) as count
+FROM iron_march_core_message_all_completed 
+WHERE message_sender_id == message_receiver_id
+GROUP BY msg_date_half
+ORDER BY msg_date_half desc
+")
+
+# Incorrect IDs in receiver col - need to be switched
+iron_march_core_message_all_receiver_ids_missing <- 
+sqldf("SELECT message_receiver_id, msg_topic_id, msg_id
+FROM iron_march_core_message_all_completed 
+WHERE message_sender_id == message_receiver_id
+")
+
+# Swap with sender IDs
+iron_march_core_message_all_receiver_ids_found <- 
+sqldf("SELECT message_sender_id, msg_topic_id, msg_id
+FROM iron_march_core_message_all_completed 
+WHERE message_sender_id != message_receiver_id
+")
+
+# Rename so I can create new order of receiver IDs from sender IDs
+names(iron_march_core_message_all_receiver_ids_found)[names(iron_march_core_message_all_receiver_ids_found) == "message_sender_id"] <- "message_receiver_id" 
+
+names(iron_march_core_message_all_receiver_ids_missing)[names(iron_march_core_message_all_receiver_ids_missing) == "message_receiver_id"] <- "drop_col" 
+iron_march_core_message_all_receiver_ids_missing$message_receiver_id <- NA # Add column to fill later
+
+iron_march_core_message_all_receiver_ids_missing$message_receiver_id <- iron_march_core_message_all_receiver_ids_found$message_receiver_id[match(iron_march_core_message_all_receiver_ids_missing$msg_topic_id, iron_march_core_message_all_receiver_ids_found$msg_topic_id)]; # Match the ID to the title of the post in the original dataset
+
+iron_march_core_message_all_receiver_ids_missing
+
+# I now have the new receiver IDs to return to overall IDs DF - NAs are fine 
+iron_march_core_message_all_receiver_ids_2 <- select(iron_march_core_message_all_receiver_ids_missing, message_receiver_id, msg_id)
+iron_march_core_message_all_receiver_ids_2
+
+iron_march_core_message_all_completed_2 <- iron_march_core_message_all_completed
+```
+
+```{r}
+# DF without mismatch values
+anti_join_messages <- anti_join(iron_march_core_message_all_completed_2, iron_march_core_message_all_receiver_ids_2, by = "msg_id")
+# DF with new IDs to solve for mismatch values
+inner_join_messages <- inner_join(iron_march_core_message_all_completed_2, iron_march_core_message_all_receiver_ids_2, by = "msg_id")
+
+# Create new DF to bind with overall DF for all messages
+iron_march_core_message_inner_join <- select(inner_join_messages, msg_topic_id, mt_title, message_sender_id, message_receiver_id.y, msg_id, msg_post, msg_date, msg_date_half)
+names(iron_march_core_message_inner_join)[names(iron_march_core_message_inner_join) == "message_receiver_id.y"] <- "message_receiver_id" 
+iron_march_core_message_inner_join
+
+iron_march_core_message_all_completed_3 <- union_all(anti_join_messages, iron_march_core_message_inner_join) %>%
+  arrange(msg_topic_id)
+
+iron_march_core_message_all_completed_3
+
+# No values now match!
+sqldf("SELECT msg_date_half,
+COUNT(msg_topic_id) as message_count
+FROM iron_march_core_message_all_completed_3 
+WHERE message_sender_id == message_receiver_id
+GROUP BY msg_date_half
+ORDER BY msg_date DESC")
+```
+
+Cleanup of the iron_march_core_message_all_completed datafame
+
+```{r}
+# n = 20514
+#Min assigned to a user with an account is 0
+#describe(iron_march_core_message_all_completed) 
+
+iron_march_core_message_all_completed <- iron_march_core_message_all_completed_3
+
+table(is.na(iron_march_core_message_all_completed)) #NAs = 468
+na.omit(iron_march_core_message_all_completed) 
+
+# 0 is not a member so this is an error that I could not resolve before
+iron_march_core_message_all_completed <- iron_march_core_message_all_completed[!(iron_march_core_message_all_completed$message_receiver_id== 0),]
+
+tibble(iron_march_core_message_all_completed)
+# 20514 messages after final process
+```
+
+#Private Messages - Adding names to the dataframe
+
+```{r}
+# iron_march_core_members_ids = IDs and names
+# iron_march_core_message_all_completed = private message dataframe
+
+iron_march_core_message_all_completed$message_sender_name <- NA # Add column to fill later
+iron_march_core_message_all_completed$message_receiver_name <- NA # Add column to fill later
+
+# message_sender_id
+names(iron_march_core_message_all_completed)[names(iron_march_core_message_all_completed) == "message_sender_id"] <- "member_id" #match core_members
+names(iron_march_core_members_ids)[names(iron_march_core_members_ids) == "name"] <- "message_sender_name" #match posts dataframe
+
+iron_march_core_message_all_completed$message_sender_name <- iron_march_core_members_ids$message_sender_name[match(iron_march_core_message_all_completed$member_id, iron_march_core_members_ids$member_id)]; # Match the ID to the title of the post in the original dataset
+
+names(iron_march_core_message_all_completed)[names(iron_march_core_message_all_completed) == "member_id"] <- "message_sender_id" #revert back
+names(iron_march_core_members_ids)[names(iron_march_core_members_ids) == "message_sender_name"] <- "name" #match posts dataframe
+
+# message_receiver_id 
+names(iron_march_core_message_all_completed)[names(iron_march_core_message_all_completed) == "message_receiver_id"] <- "member_id" #match core_member
+names(iron_march_core_members_ids)[names(iron_march_core_members_ids) == "name"] <- "message_receiver_name" #match posts dataframe
+
+iron_march_core_message_all_completed$message_receiver_name <- iron_march_core_members_ids$message_receiver_name[match(iron_march_core_message_all_completed$member_id, iron_march_core_members_ids$member_id)]; # Match the ID to the title of the post in the original dataset
+
+names(iron_march_core_message_all_completed)[names(iron_march_core_message_all_completed) == "member_id"] <- "message_receiver_id" #revert back
+names(iron_march_core_members_ids)[names(iron_march_core_members_ids) == "message_receiver_name"] <- "name" #match next dataframe
+
+head(iron_march_core_message_all_completed)
+#describe(iron_march_core_message_all_completed)
+
+```
+
+# DATA DESCRIPTION 
+
+##SQLDF to pull users who use keywords
+https://www.r-bloggers.com/2021/04/using-sql-for-r-data-frames-with-sqldf/
+https://rdrr.io/cran/sqldf/man/sqldf.html
+
+# Private Messages
+iron_march_core_message_posts_names
+
+```{r}
+library(dplyr)
+library(sqldf)
+
+#colnames(iron_march_core_message_posts_names1)
+colnames(iron_march_core_message_all_completed)
+
+#Atomwaffen Divison, National Action, SKD, FKD
+
+iron_march_terrorist_keyword_messages <- 
+sqldf("SELECT msg_date, message_sender_id, message_sender_name, msg_post, msg_id, msg_date_half, message_receiver_id, message_receiver_name
+FROM iron_march_core_message_all_completed 
+where ([msg_post] like '%waffen%' OR
+[msg_post] like '%awd%' OR
+[msg_post] like '%national action%' OR
+[msg_post] like '%division%' OR
+[msg_post] like '%feuerkrieg%' OR
+[msg_post] like '%sonnenkrieg%')
+ORDER BY msg_date")
+
+write.csv(iron_march_terrorist_keyword_messages,"iron_march_terrorist_keywords_messages.csv", row.names = FALSE)
+
+#Joining/Recruiting 
+iron_march_recruitment_messages <- 
+sqldf("SELECT msg_date, message_sender_id, message_sender_name, msg_post, msg_id, msg_date_half, message_receiver_id, message_receiver_name
+FROM iron_march_core_message_all_completed 
+WHERE
+([msg_post] like '%waffen%' OR
+[msg_post] like '%awd%' OR
+[msg_post] like '%national action%' OR
+[msg_post] like '%division%' OR
+[msg_post] like '%feuerkrieg%' OR
+[msg_post] like '%sonnenkrieg%')
+
+AND 
+([msg_post] like '%join%' OR
+[msg_post] like '%website%' OR
+[msg_post] like '%contact%' OR
+[msg_post] like '%email%' OR
+[msg_post] like '%skype%' OR
+[msg_post] like '%telegram%')
+ORDER BY msg_date")
+
+write.csv(iron_march_recruitment_messages,"iron_march_recruitment_messages.csv", row.names = FALSE)
+
+```
+
+# Comments/Posts
+iron_march_core_forum_posts_names
+
+```{r}
+#member_id = index_author which is the member who created the comments (index_content) on the Post 
+#index_item_author is the user who created the post (index_item_index_id).
+#The text in index_title by the index_item_author is the title of the post. 
+
+#Atomwaffen Divison, National Action, SKD, FKD
+
+iron_march_terrorist_keywords_comments <- 
+sqldf("SELECT index_author, index_author_name, index_content, index_id, index_title, index_item_index_id, index_date_created, index_date_created_half, index_date_updated, index_date_updated_half
+FROM iron_march_core_forum_posts_names1
+where 
+([index_content] like '%waffen%' OR
+[index_content] like '%awd%' OR
+[index_content] like '%national action%' OR
+[index_content] like '%division%' OR
+[index_content] like '%feuerkrieg%' OR
+[index_content] like '%sonnenkrieg%')
+ORDER BY index_date_created")
+
+write.csv(iron_march_terrorist_keywords_comments,"iron_march_terrorist_keywords_comments.csv", row.names = FALSE)
+
+#Joining/Recruiting 
+iron_march_recruitment_comments <- 
+sqldf("SELECT index_author, index_author_name, index_content, index_id, index_title, index_item_index_id, index_date_created, index_date_created_half, index_date_updated, index_date_updated_half
+FROM iron_march_core_forum_posts_names1
+WHERE
+([index_content] like '%waffen%' OR
+[index_content] like '%awd%' OR
+[index_content] like '%national action%' OR
+[index_content] like '%division%' OR
+[index_content] like '%feuerkrieg%' OR
+[index_content] like '%sonnenkrieg%')
+
+AND 
+([index_content] like '%join%' OR
+[index_content] like '%website%' OR
+[index_content] like '%contact%' OR
+[index_content] like '%email%' OR
+[index_content] like '%skype%' OR
+[index_content] like '%telegram%')
+ORDER BY index_date_created")
+
+write.csv(iron_march_recruitment_comments,"iron_march_recruitment_comments.csv", row.names = FALSE)
+
+#-------------------------------------------------------
+
+#Keywords Posts
+iron_march_keywords_posts <- 
+sqldf("SELECT index_item_author, index_item_author_name,  index_item_id, index_title, index_date_created, index_date_created_half
+FROM iron_march_core_forum_posts_names1
+WHERE
+([index_title] like '%waffen%' OR
+[index_title] like '%awd%' OR
+[index_title] like '%national action%' OR
+[index_title] like '%division%' OR
+[index_title] like '%feuerkrieg%' OR
+[index_title] like '%sonnenkrieg%')
+ORDER BY index_date_created")
+
+write.csv(iron_march_keywords_posts,"iron_march_keywords_posts.csv", row.names = FALSE)
+
+#Joining/Recruiting Posts
+iron_march_recruitment_posts <- 
+sqldf("SELECT index_item_author, index_item_author_name, index_content, index_item_id, index_title, index_date_created, index_date_created_half
+FROM iron_march_core_forum_posts_names1 
+WHERE
+([index_title] like '%waffen%' OR
+[index_title] like '%awd%' OR
+[index_title] like '%national action%' OR
+[index_title] like '%division%' OR
+[index_title] like '%feuerkrieg%' OR
+[index_title] like '%sonnenkrieg%')
+
+AND 
+([index_title] like '%join%' OR
+[index_title] like '%website%' OR
+[index_title] like '%contact%' OR
+[index_title] like '%email%' OR
+[index_title] like '%skype%' OR
+[index_title] like '%telegram%')
+ORDER BY index_date_created")
+
+write.csv(iron_march_recruitment_posts,"iron_march_recruitment_posts.csv", row.names = FALSE)
+```
+
+
+#CREATE DATAFRAME/CSV FOR MANUAL TEXT ANALYSIS 
+
+```{r}
+
+colnames(iron_march_core_members)
+iron_march_features <- subset(iron_march_core_members, select = c("member_id", "name", "email", "joined", "joined_half", "msg_count_total", "members_profile_views", "member_posts", "last_visit_half", "last_activity", "last_activity_half")) 
+
+#1103 rows x 15 columns
+iron_march_features$role <- NA # Add column to fill later
+
+```
+
+#LABEL NODES
+
+#Assigning Roles to Iron March Members
+iron_march_features
+
+```{r}
+
+iron_march_mod <- read.csv("core_moderator_logs.csv", sep =',', header = TRUE)
+iron_march_admin <- read.csv("core_admin_logs.csv", sep =',', header = TRUE)
+
+```
+
+#Moderators
+650 moderators during course of the forum. 29% of members at the end are moderators.
+
+```{r}
+
+#32547 rows
+#describe(iron_march_mod) #member_id 0 does not exist - this is an error
+iron_march_mod <- iron_march_mod[iron_march_mod$member_id != 0, ] #28665 rows
+iron_march_mod$ctime <- as.POSIXct(iron_march_mod$ctime, origin="1970-01-01", tz="GMT")
+iron_march_mod$ctime <- as.POSIXct(iron_march_mod$ctime, format="%Y-%m-%dT%H:%M")
+iron_march_mod$mod_half  <- semester(iron_march_mod$ctime, with_year = TRUE)
+
+#---------> Analysis of Mods <----------
+
+# Convert to date for analysis 
+iron_march_mod$ctime= as.Date(iron_march_mod$ctime, format = "%Y-%m-%d")
+class(iron_march_mod$ctime)
+
+# Slice for first date for each ID
+im_mod_unique <- iron_march_mod %>%
+    group_by(member_id) %>%
+    arrange(ctime) %>%
+    slice(1L)
+
+# Now change mod_half to factor for graph
+im_mod_unique$mod_half <- as.factor(im_mod_unique$mod_half) # change to factor
+
+mod_count <- im_mod_unique %>%
+  group_by(mod_half) %>%
+  summarise(n = n()) %>%
+  mutate(Freq = round(n/sum(n)*100, digits = 2))
+
+class(mod_count$mod_half) # factor
+
+# remove NAs
+mod_count <- na.omit(mod_count) 
+
+# bar chart
+mod_count %>%  
+  ggplot( aes(x=mod_half, y=n)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Count of When Members Become Moderators by Half") +
+  xlab("Year and Half") + ylab("Count of Memebrs") +
+geom_label(
+    aes(label=n), 
+    nudge_x = 0, nudge_y = 15, 
+    check_overlap = T,
+    size = 3) 
+
+#---------> Prep Mods for Member Dataset <---------
+
+# Join to get join date AND first activity as a mod
+iron_march_first_mod_ids <- 
+sqldf("SELECT 
+y.member_id,
+y.name,
+y.email,
+y.joined,
+y.joined_half,
+y.msg_count_total,
+y.members_profile_views,
+y.member_posts,
+y.last_visit_half,
+y.last_activity,
+y.last_activity_half,
+x.ctime,
+x.mod_half
+FROM iron_march_mod x
+JOIN iron_march_features y
+ON y.member_id = x.member_id")
+iron_march_first_mod_ids
+
+# Identify members who became mods when they joined
+iron_march_first_mod_ids <- 
+sqldf("SELECT DISTINCT member_id
+FROM iron_march_first_mod_ids
+WHERE [mod_half] == [joined_half]
+ORDER BY member_id")
+
+iron_march_first_mod_ids$role <- "Iron March Moderator"
+iron_march_first_mod_ids
+```
+
+#Admins
+```{r}
+colnames(iron_march_admin)
+
+iron_march_admin$ctime <- as.POSIXct(iron_march_admin$ctime, origin="1970-01-01", tz="GMT")
+iron_march_admin$ctime <- as.POSIXct(iron_march_admin$ctime, format="%Y-%m-%dT%H:%M")
+iron_march_admin$admin_half  <- semester(iron_march_admin$ctime, with_year = TRUE)
+
+# Convert to date for analysis 
+iron_march_admin$ctime= as.Date(iron_march_admin$ctime, format = "%Y-%m-%d")
+class(iron_march_admin$ctime)
+
+# Slice for first date for each ID
+im_admin_unique <- iron_march_admin %>%
+    group_by(member_id) %>%
+    arrange(ctime) %>%
+    slice(1L)
+
+# ID First Log Name
+# 1	2011-09-12	= 	Александр Славрос	 *
+#	2	2012-10-13	= PhalNat	
+# 7	2012-03-29	= Daddy Terror
+# 9	2011-12-19	= Woman in Black *
+# 13	2012-11-24	= Ritz
+# 35	2012-04-02 = 	American_Blackshirt
+
+#14595 rows
+describe(iron_march_admin) # no member_id 0 
+
+iron_march_admin_ids <- 
+sqldf("SELECT DISTINCT member_id
+FROM iron_march_admin 
+ORDER BY member_id")
+
+iron_march_admin_ids$role <- "Iron March Admin"
+iron_march_admin_ids
+
+# Names of Admins
+sqldf("SELECT member_id, name
+FROM iron_march_features
+WHERE ([member_id] = '1' OR
+[member_id] = '2' OR
+[member_id] = '7' OR
+[member_id] = '9' OR
+[member_id] = '13' OR
+[member_id] = '35')
+ORDER BY member_id")
+
+#iron_march_features$role <- iron_march_admin_ids$role[match(iron_march_features$member_id, iron_march_admin_ids$member_id)]; # Match the ID to the title of the post in the original dataset
+
+#Admins x 6
+#Mods x 642
+table(iron_march_features$role)
+
+```
+
+#Labelling Users
+
+Assigning roles to all users based on analysis from messages and message topics. Terrorist will be anyone who: recruits, finances, spreads propaganda, convicted. Seekers are users who are seeking to join a terrorist org. 
+
+iron_march_features
+
+```{r}
+
+#colnames(iron_march_features)
+
+awd_member_ids <- sqldf("SELECT DISTINCT member_id
+FROM iron_march_features 
+WHERE 
+([member_id] = '9941' OR
+[member_id] = '6249' OR
+[member_id] = '9304' OR
+[member_id] = '9690' OR
+[member_id] = '13328' OR
+[member_id] = '9446' OR
+[member_id] = '13264' OR
+[member_id] = '13209' OR
+[member_id] = '7600' OR
+[member_id] = '6249' OR
+[member_id] = '13024')
+ORDER BY member_id")
+awd_member_ids
+awd_member_ids$role <- "AWD Member"
+
+awd_recruiter_ids <- sqldf("SELECT DISTINCT member_id
+FROM iron_march_features 
+WHERE 
+([member_id] = '168' OR
+[member_id] = '13901' OR
+[member_id] = '9847' OR
+[member_id] = '13661' OR
+[member_id] = '9619' OR
+[member_id] = '7600' OR
+[member_id] = '10133' OR
+[member_id] = '13426' OR
+[member_id] = '9476')
+ORDER BY member_id")
+awd_recruiter_ids
+awd_recruiter_ids$role <- "AWD Recruiter"
+
+awd_recruiter_ids <- sqldf("SELECT DISTINCT member_id
+FROM iron_march_features 
+WHERE 
+([member_id] = '168' OR
+[member_id] = '13901' OR
+[member_id] = '9847' OR
+[member_id] = '9174' OR
+[member_id] = '13661' OR
+[member_id] = '9619' OR
+[member_id] = '7600' OR
+[member_id] = '10133' OR
+[member_id] = '13426' OR
+[member_id] = '9476')
+ORDER BY member_id")
+awd_recruiter_ids
+awd_recruiter_ids$role <- "AWD Recruiter"
+
+awd_seeker_ids <- sqldf("SELECT DISTINCT member_id
+FROM iron_march_features 
+WHERE 
+([member_id] = '13215' OR
+[member_id] = '8026' OR
+[member_id] = '14191' OR
+[member_id] = '13442' OR
+[member_id] = '14100' OR
+[member_id] = '13956' OR
+[member_id] = '14069' OR
+[member_id] = '9940' OR
+[member_id] = '9549' OR
+[member_id] = '13692' OR
+[member_id] = '9742' OR
+[member_id] = '13013' OR
+[member_id] = '9960' OR
+[member_id] = '13049' OR
+[member_id] = '14170' OR
+[member_id] = '13878' OR
+[member_id] = '14407' OR
+[member_id] = '13292' OR
+[member_id] = '13263' OR
+[member_id] = '13958' OR
+[member_id] = '13425' OR
+[member_id] = '9728' OR
+[member_id] = '13042' OR
+[member_id] = '14327' OR
+[member_id] = '14136' OR
+[member_id] = '13558' OR
+[member_id] = '3143' OR
+[member_id] = '13029' OR
+[member_id] = '14599' OR
+[member_id] = '9830')
+ORDER BY member_id")
+awd_seeker_ids
+awd_seeker_ids$role <- "AWD Seeker"
+
+na_member_ids <- sqldf("SELECT DISTINCT member_id
+FROM iron_march_features 
+WHERE 
+([member_id] = '13294' OR
+[member_id] = '13005' OR
+[member_id] = ' 6260' OR
+[member_id] = ' 28' OR
+[member_id] = ' 9939' OR
+[member_id] = ' 10319' OR
+[member_id] = ' 13353' OR
+[member_id] = ' 7' OR
+[member_id] = '9174' OR
+[member_id] = ' 2')
+ORDER BY member_id")
+na_member_ids
+na_member_ids$role <- "National Action Member"
+
+na_recruiter_ids <- sqldf("SELECT DISTINCT member_id
+FROM iron_march_features 
+WHERE 
+([member_id] = '13120' OR
+[member_id] = '2075' OR
+[member_id] = ' 2306' OR
+[member_id] = ' 150' OR
+[member_id] = ' 9174')
+ORDER BY member_id")
+na_recruiter_ids
+na_recruiter_ids$role <- "National Action Recruiter"
+
+na_seeker_ids <- sqldf("SELECT DISTINCT member_id
+FROM iron_march_features 
+WHERE 
+([member_id] = '1066' OR
+[member_id] = '11235' OR
+[member_id] = ' 9950')
+ORDER BY member_id")
+na_seeker_ids
+na_seeker_ids$role <- "National Action Seeker"
+```
+
+https://cran.r-project.org/web/packages/gridExtra/vignettes/tableGrob.html
+
+```{r}
+iron_march_role_ids <- rbind(iron_march_admin_ids, iron_march_first_mod_ids, awd_member_ids, awd_recruiter_ids, awd_seeker_ids, na_member_ids, na_recruiter_ids, na_seeker_ids) # bind all identified roles
+
+iron_march_features$role <- iron_march_role_ids$role[match(iron_march_features$member_id, iron_march_role_ids$member_id)]; # Match the ID and add to dataframe
+
+iron_march_features$role <- iron_march_features$role  %>% replace_na('Iron March Member') # assign remaining nodes general role as member
+
+library(gridExtra)
+library(grid)
+
+grid.table(iron_march_features$role)
+
+#head(iron_march_features)
+
+```
+
+#CREATING DELIVERABLE: CLEANED DATASET FOR IRON MARCH 
+#CREATE FINAL DATAFRAME/CSV FOR ANALYSIS 
+
+iron_march_core_message_all_completed = private messages
+iron_march_core_members = member info
+iron_march_core_forum_posts_names1 = posts/comments
+
+#MEMBERS
+
+Data set = iron_march_members
+
+```{r}
+
+#colnames(iron_march_features)
+library(dplyr)
+iron_march_members <- iron_march_features
+
+names(iron_march_members)[names(iron_march_members) == "name"] <- "member_name"
+names(iron_march_members)[names(iron_march_members) == "email"] <- "member_email"
+names(iron_march_members)[names(iron_march_members) == "joined"] <- "member_joined"
+names(iron_march_members)[names(iron_march_members) == "joined_half"] <- "member_joined_half"
+names(iron_march_members)[names(iron_march_members) == "msg_count_total"] <- "member_msg_count"
+names(iron_march_members)[names(iron_march_members) == "members_profile_views"] <- "member_profile_views"
+names(iron_march_members)[names(iron_march_members) == "last_visit_half"] <- "member_last_visit_half"
+names(iron_march_members)[names(iron_march_members) == "last_activity"] <- "member_last_activity_date"
+names(iron_march_members)[names(iron_march_members) == "last_activity_half"] <- "member_last_activity_half"
+names(iron_march_members)[names(iron_march_members) == "role"] <- "member_role"
+
+# Data description code
+#colnames(iron_march_members)
+#describe(iron_march_members)
+#summary(iron_march_members)
+
+#table(iron_march_members$member_role)
+
+write.csv(iron_march_members,"iron_march_members.csv", row.names = FALSE)
+
+```
+
+# iron_march_members visuals
+
+```{r}
+
+# http://www.sthda.com/english/wiki/ggplot2-title-main-axis-and-legend-titles
+# http://www.cookbook-r.com/Graphs/Plotting_distributions_(ggplot2)/
+
+# DF with no. of counts for each role
+role_count <- iron_march_members %>%
+  group_by(member_role) %>% # grouping and ordering in alphabetical order
+  summarise(counts = n())
+
+role_count <- role_count[order(-role_count$counts),]
+role_count
+
+library(forcats)
+
+# Reorder following the value of another column:
+role_count %>% filter(member_role != c("Iron March Member", "Iron March Moderator")) %>% # exclude IM member  + mod
+  mutate(member_role = fct_reorder(member_role, counts)) %>%
+  ggplot( aes(x=member_role, y=counts)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    coord_flip() +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Count of Roles on Iron March") +
+  xlab("Role") + ylab("Count of Members")
+
+# Numeric data histograms
+
+iron_march_members %>%
+  ggplot( aes(x=member_msg_count)) +
+    geom_histogram( binwidth=5, fill="#69b3a2", color="#e9ecef", alpha=0.9) +
+  ggtitle("Distribution of Member Message Count") +
+  xlab("Number of Messages Sent") + 
+  ylab("Count of Members") +
+    theme_ipsum() +
+    theme(plot.title = element_text(size=10))
+      
+# member_msg_count
+# Basic B&W with mean line
+
+ggplot(iron_march_members, aes(x=member_msg_count)) +
+    geom_histogram(binwidth=6, colour="black", fill="white") +
+    geom_vline(aes(xintercept=mean(member_msg_count, na.rm=T)),   # Ignore NA values for mean
+               color="red", linetype="dashed", size=1) +
+  ggtitle("Distribution of Member Message Count") +
+  xlab("Number of Messages Sent") + ylab("Count of Members")
+
+# member_posts
+# Basic B&W with mean line
+
+ggplot(iron_march_members, aes(x=member_posts)) +
+    geom_histogram(binwidth=220, colour="black", fill="white") +
+    geom_vline(aes(xintercept=mean(member_posts, na.rm=T)),   # Ignore NA values for mean
+               color="red", linetype="dashed", size=1) +
+  ggtitle("Distribution of Member Post Count") +
+  xlab("Number of Posts") + ylab("Count of Members")
+
+# joined
+joined_count <- iron_march_members %>%
+  group_by(member_joined_half) %>%
+  summarise(n = n()) %>%
+  mutate(Freq = round(n/sum(n)*100, digits = 2))
+
+# remove NAs
+joined_count <- na.omit(joined_count) 
+joined_count$member_joined_half <- as.factor(joined_count$member_joined_half ) # change to factor
+
+# bar chart
+joined_count %>%  
+  ggplot( aes(x=member_joined_half, y=n)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Frequency of Members Joining By Half") +
+  xlab("Year and Half") + ylab("Count of Memebrs Joining") +
+geom_label(
+    aes(label=n), 
+    nudge_x = 0, nudge_y = 15, 
+    check_overlap = T,
+    size = 3) 
+
+# line chart
+#joined_count <- iron_march_members %>%
+#  group_by(member_joined_half) %>% # grouping and ordering in alphabetical order
+#  summarise(counts = n())
+#joined_count
+#
+#joined_count %>%
+#  tail(10) %>%
+#  ggplot( aes(x=member_joined_half, y=counts)) +
+#    geom_line( color="grey") +
+#    geom_point(shape=20, color="black", fill="#69b3a2", size=6) +
+#  ggtitle("Timeline of Members Joining By Half") +
+#  xlab("Year and Half") + ylab("Count of Memebrs Joining")
+
+```
+
+#MESSAGES
+
+Dataset = iron_march_private_messages
+
+```{r}
+
+colnames(iron_march_core_message_all_completed)
+
+library(dplyr)
+
+iron_march_private_messages <- select(iron_march_core_message_all_completed, msg_topic_id, mt_title, message_sender_id, message_sender_name, message_receiver_id, message_receiver_name, msg_id, msg_post, msg_date, msg_date_half)
+
+names(iron_march_private_messages)[names(iron_march_private_messages) == "msg_topic_id"] <- "msg_thread_id" #match core_members
+names(iron_march_private_messages)[names(iron_march_private_messages) == "mt_title"] <- "msg_thread_title" #match core_members
+names(iron_march_private_messages)[names(iron_march_private_messages) == "message_sender_id"] <- "msg_sender_id" #match core_members
+names(iron_march_private_messages)[names(iron_march_private_messages) == "message_receiver_id"] <- "msg_receiver_id" #match core_members
+names(iron_march_private_messages)[names(iron_march_private_messages) == "message_sender_name"] <- "msg_sender_name" #match core_members
+names(iron_march_private_messages)[names(iron_march_private_messages) == "message_receiver_name"] <- "msg_receiver_name" 
+names(iron_march_private_messages)[names(iron_march_private_messages) == "msg_id"] <- "msg_post_id" 
+names(iron_march_private_messages)[names(iron_march_private_messages) == "msg_post"] <- "msg_text" 
+
+# Data description code
+head(iron_march_private_messages)
+colnames(iron_march_private_messages)
+describe(iron_march_private_messages)
+summary(iron_march_private_messages)
+
+
+write.csv(iron_march_private_messages,"iron_march_private_messages.csv", row.names = FALSE)
+
+```
+
+# Visuals for private messages
+
+```{r}
+
+# Want to convey the repeated use of titles
+msg_title_count_unique <- 
+sqldf("SELECT DISTINCT msg_thread_title, msg_thread_id
+FROM iron_march_private_messages 
+")
+msg_title_count_unique
+
+# group and filter for titles
+msg_title_count <- msg_title_count_unique %>%
+  group_by(msg_thread_title) %>% # grouping by titles
+  summarise(counts = n())   %>% 
+  filter(counts > 10) # filter out for repeated titles
+msg_title_count
+
+# reorder by counts desc
+msg_title_count <- msg_title_count[order(-msg_title_count$counts),]
+msg_title_count
+
+msg_title_count %>% filter(msg_thread_title != "Iron March Member") %>% # exclude IM member 
+  mutate(msg_thread_title = fct_reorder(msg_thread_title, counts)) %>%
+  ggplot( aes(x=msg_thread_title, y=counts)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    coord_flip() +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Unique Count of Message Title on Iron March", subtitle = "When Titles Connected to >10 Messages") +
+  xlab("Message Titles") + ylab("Count of Messages")
+
+# messages sent
+messages_count <- iron_march_private_messages %>%
+  group_by(msg_date_half) %>%
+  summarise(n = n()) %>%
+  mutate(Freq = round(n/sum(n)*100, digits = 2))
+
+# remove NAs
+messages_count <- na.omit(messages_count) 
+messages_count$msg_date_half <- as.factor(messages_count$msg_date_half ) # change to factor
+
+# bar chart
+messages_count %>%  
+  ggplot( aes(x=msg_date_half, y=n)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Frequency of Members Sending Messages By Half") +
+  xlab("Year and Half") + ylab("Count of Memebrs Sending Messagess") +
+geom_label(
+    aes(label=n), 
+    nudge_x = 0, nudge_y = 180, 
+    check_overlap = T,
+    size = 3) 
+
+# line chart
+#messages_count %>%
+# ggplot(aes(x=msg_date_half, y=n)) +
+#    geom_line( color="grey") +
+#    geom_point(shape=20, color="black", fill="#69b3a2", size=6) +
+#geom_label(
+#    aes(label=n), 
+#    nudge_x = 0.25, nudge_y = 0.25, 
+#    check_overlap = T) +
+#  ggtitle("Timeline of Members Sending Messages By Half") +
+#  xlab("Year and Half") + ylab("Count of Memebrs Sending Messages") +
+#  scale_x_discrete(breaks = messages_count$msg_date_half)
+```
+
+# Boxplots & Medians - Messages + Role
+
+```{r}
+
+iron_march_members %>% group_by(member_role,) %>% summarise(median(member_msg_count))
+
+iron_march_members %>%
+  mutate(member_role = fct_reorder(member_role, member_msg_count, .fun='median')) %>%
+  ggplot( aes(x=reorder(member_role, member_msg_count), y=member_msg_count, fill=member_role)) + 
+    geom_boxplot() +
+    xlab("class") +
+    xlab("") + 
+   ggtitle('Median Messages Sent By Role') + # naming labels
+   labs(y="Median of Messages Sent", x = "Role") +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) +
+scale_fill_discrete(name = "Role")
+
+```
+
+#COMMENTS/POSTS - TOPICS
+
+iron_march_core_forum_posts_names1 = posts/comments
+
+Dataset = iron_march_comments_posts
+
+```{r}
+
+library(dplyr)
+
+iron_march_comments_posts <- select(iron_march_core_forum_posts_names1, index_class, index_date_created, index_date_created_half, index_date_updated, index_date_updated_half, index_item_id, index_title, index_item_author, index_item_author_name, index_id, index_content, index_is_last_comment, index_author, index_author_name)
+
+names(iron_march_comments_posts)[names(iron_march_comments_posts) == "index_class"] <- "post_class" #match core_members
+names(iron_march_comments_posts)[names(iron_march_comments_posts) == "index_item_id"] <- "post_id" #match core_members
+names(iron_march_comments_posts)[names(iron_march_comments_posts) == "index_title"] <- "post_title" #match core_members
+names(iron_march_comments_posts)[names(iron_march_comments_posts) == "index_item_author"] <- "post_author_id" #match core_members
+names(iron_march_comments_posts)[names(iron_march_comments_posts) == "index_item_author_name"] <- "post_author_name" #match core_members
+names(iron_march_comments_posts)[names(iron_march_comments_posts) == "index_date_created"] <- "post_date_created" #match core_members
+names(iron_march_comments_posts)[names(iron_march_comments_posts) == "index_date_updated"] <- "post_date_updated" #match core_members
+names(iron_march_comments_posts)[names(iron_march_comments_posts) == "index_id"] <- "post_comment_id" #match core_members
+names(iron_march_comments_posts)[names(iron_march_comments_posts) == "index_content"] <- "comment_text"
+names(iron_march_comments_posts)[names(iron_march_comments_posts) == "index_author"] <- "comment_author_id" 
+names(iron_march_comments_posts)[names(iron_march_comments_posts) == "index_author_name"] <- "comment_author_name" 
+names(iron_march_comments_posts)[names(iron_march_comments_posts) == "index_is_last_comment"] <- "comment_is_last" 
+names(iron_march_comments_posts)[names(iron_march_comments_posts) == "index_date_created_half"] <- "post_date_half" 
+names(iron_march_comments_posts)[names(iron_march_comments_posts) == "index_date_updated_half"] <- "post_updated_half" 
+
+colnames(iron_march_comments_posts)
+
+# Statuses are one way communications, and are always the last comment logged. Events can be created and can attract interactions in the form of comments
+# I want to filter these out later when creating my edges but not in the final dataset 
+# Statuses can still be useful information 
+
+iron_march_comments_posts_filtered <- 
+sqldf("SELECT DISTINCT post_class,    post_date_created,   post_date_half,    post_date_updated,   post_updated_half,   post_id,       post_title,     post_author_id ,post_author_name,    post_comment_id,     comment_text,        comment_is_last,     comment_author_id,      comment_author_name
+FROM iron_march_comments_posts 
+WHERE [post_class] = 'IPS\\forums\\Topic\\Post'")
+
+iron_march_events <- 
+sqldf("SELECT DISTINCT post_class,    post_date_created,   post_date_half,    post_date_updated,   post_updated_half,   post_id,       post_title,     post_author_id ,post_author_name,    post_comment_id,     comment_text,        comment_is_last,     comment_author_id,      comment_author_name
+FROM iron_march_comments_posts 
+WHERE [post_class] = 'IPS\\calendar\\Event'")
+
+iron_march_events_comments <- 
+sqldf("SELECT DISTINCT post_class,    post_date_created,   post_date_half,    post_date_updated,   post_updated_half,   post_id,       post_title,     post_author_id ,post_author_name,    post_comment_id,     comment_text,        comment_is_last,     comment_author_id,      comment_author_name
+FROM iron_march_comments_posts 
+WHERE  [post_class] = 'IPS\\calendar\\Event\\Comment'")
+
+write.csv(iron_march_comments_posts,"iron_march_comments_posts.csv", row.names = FALSE)
+
+# Data Description 
+head(iron_march_comments_posts)
+colnames(iron_march_comments_posts)
+describe(iron_march_comments_posts)
+summary(iron_march_comments_posts)
+
+sum(is.na(iron_march_comments_posts$comment_author_name)) # 7076
+sum(is.na(iron_march_comments_posts$comment_author_id)) # 0
+
+table(iron_march_comments_posts$post_class)
+
+library(forcats)
+class_count <- iron_march_comments_posts %>%
+  group_by(post_class) %>% # grouping and ordering in alphabetical order
+  summarise(counts = n())
+class_count
+
+# Reorder following the value of another column:
+class_count %>% filter(post_class != "Iron March Member") %>% # exclude IM member 
+  mutate(name = fct_reorder(post_class, counts)) %>%
+  ggplot( aes(x=post_class, y=counts)) +
+    geom_bar(stat="identity", fill="#f68060", alpha=.6, width=.4) +
+    coord_flip() +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Count of Roles on Iron March") +
+  xlab("Role") + ylab("Count of Memebrs")
+
+```
+
+```{r}
+# Posts created
+posts_count <- iron_march_comments_posts %>%
+  group_by(post_date_half) %>%
+  summarise(n = n()) %>%
+  mutate(Freq = round(n/sum(n)*100, digits = 2))
+
+# remove NAs
+posts_count <- na.omit(posts_count) 
+posts_count$post_date_half <- as.factor(posts_count$post_date_half) # change to factor
+
+# bar chart
+posts_count %>%  
+  ggplot( aes(x=post_date_half, y=n)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Frequency of Members Creating Posts By Half") +
+  xlab("Year and Half") + ylab("Count of Memebrs Creating Posts") +
+geom_label(
+    aes(label=n), 
+    nudge_x = 0, nudge_y =1000, 
+    check_overlap = T,
+    size = 3) 
+
+# Count of Post titles only excluding events and event comments
+title_freq_count <- iron_march_comments_posts_filtered %>%
+  group_by(post_title) %>%
+  summarise(n = n()) %>%
+  mutate(Freq = round(n/sum(n)*100, digits = 2)) %>%
+filter(n >1000)
+title_freq_count
+
+title_freq_count %>% 
+  mutate(post_title = fct_reorder(post_title, n)) %>%
+  ggplot( aes(x=post_title, y=n)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    coord_flip() +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Unique Count of Posts on Iron March", subtitle = "When Titles Have >1000 Comments and including only Topics") +
+  xlab("Post Titles") + ylab("Count of Comments")
+
+# Count of users who comment the most
+commentuser_freq_count <- iron_march_comments_posts %>%
+  group_by(comment_author_name) %>%
+  summarise(n = n()) %>%
+  mutate(Freq = round(n/sum(n)*100, digits = 2)) %>%
+filter(n >2350)
+commentuser_freq_count
+
+commentuser_freq_count <- na.omit(commentuser_freq_count) 
+
+commentuser_freq_count %>% 
+  mutate(comment_author_name = fct_reorder(comment_author_name, n)) %>%
+  ggplot( aes(x=comment_author_name, y=n)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    coord_flip() +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Memebers Who Commented the Most on Iron March (2011 - 2017)", subtitle = "When Memebers Have >2350 Comments") +
+  xlab("Comment Author Name") + ylab("Count of Comments")
+
+```
+
+# Boxplots & Medians - Messages + Role
+```{r}
+
+iron_march_members %>% group_by(member_role,) %>% summarise(median(member_posts))
+
+iron_march_members %>%
+  mutate(member_role = fct_reorder(member_role, member_posts, .fun='median')) %>%
+  ggplot( aes(x=reorder(member_role, member_posts), y=member_posts, fill=member_role)) + 
+    geom_boxplot() +
+    xlab("class") +
+    xlab("") + 
+   ggtitle('Median Posts/Comments By Role') + # naming labels
+   labs(y="Median of Posts/Comments", x = "Role") +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) +
+scale_fill_discrete(name = "Role")
+
+
+```
+
+##SNA Preparation - Private Messages
+
+edges = iron_march_core_message_topics_names1, iron_march_core_forum_posts_names1, iron_march_private_messages
+nodes = iron_march_features
+
+```{r}
+
+colnames(iron_march_core_forum_posts_names1)
+colnames(iron_march_core_message_topics_names1)
+colnames(iron_march_core_message_posts_names1)
+colnames(iron_march_private_messages)
+
+```
+
+## Node list
+
+```{r}
+library(tidyverse)
+
+# Put all unique nodes into one dataframe
+colnames(iron_march_comments_posts_filtered) # posts only, can be created by other nodes
+colnames(iron_march_events) # events only
+colnames(iron_march_features)
+
+#------ Member -------
+iron_march_core_members_nodes <- select(iron_march_features, name, role, joined, last_activity, joined_half) # select node and attribute role
+
+names(iron_march_core_members_nodes)[names(iron_march_core_members_nodes) == "joined"] <- "start date" #match core_members
+names(iron_march_core_members_nodes)[names(iron_march_core_members_nodes) == "last_activity"] <- "end date" #match core_members
+names(iron_march_core_members_nodes)[names(iron_march_core_members_nodes) == "joined_half"] <- "start_half" #match core_members
+
+#------ Posts -------
+
+iron_march_comments_posts_filtered$role <- "Iron March Post" # Add column and assign attribute role (node)
+iron_march_events$role <- "Iron March Event" # Add column and assign attribute role (node)
+
+# Not a node, this is an Edge
+iron_march_events_comments$role <- "Comment" # Add column and assign attribute role to be used later for edges
+
+#  post_date_created, post_date_updated
+
+iron_march_comments_posts_filtered <- iron_march_comments_posts_filtered[!duplicated(iron_march_comments_posts_filtered$post_id), ]
+iron_march_events <- iron_march_events[!duplicated(iron_march_events$post_id), ]
+
+iron_march_post_events_nodes <- rbind(iron_march_comments_posts_filtered, iron_march_events) # bind all identified roles
+
+iron_march_core_forum_posts_titles_nodes <- iron_march_post_events_nodes
+
+iron_march_core_forum_posts_titles_nodes<- select(iron_march_core_forum_posts_titles_nodes, post_title, role, post_date_created, post_date_updated, post_date_half) # select node and attribute role
+table(iron_march_core_forum_posts_titles_nodes$role)
+
+names(iron_march_core_forum_posts_titles_nodes)[names(iron_march_core_forum_posts_titles_nodes) == "post_title"] <- "name" #match core_members
+names(iron_march_core_forum_posts_titles_nodes)[names(iron_march_core_forum_posts_titles_nodes) == "post_date_created"] <- "start date" #match core_members
+names(iron_march_core_forum_posts_titles_nodes)[names(iron_march_core_forum_posts_titles_nodes) == "post_date_updated"] <- "end date" #match core_members
+names(iron_march_core_forum_posts_titles_nodes)[names(iron_march_core_forum_posts_titles_nodes) == "post_date_half"] <- "start_half" #match core_members
+
+# Bind the two dataframes members and posts
+iron_march_nodes <- rbind(iron_march_core_members_nodes, iron_march_core_forum_posts_titles_nodes) # bind all identified roles
+
+table(iron_march_nodes$role)
+
+library(dplyr)
+#mutate(iron_march_nodes, id = row_number())
+iron_march_nodes <- iron_march_nodes %>% rowid_to_column("id")
+
+# https://github.com/nicolewhite/neo4j-alchemy-cluster/issues/2 issue with id being first column - but duplicates exist as nodes
+#iron_march_nodes <- select(iron_march_nodes, name, id)
+#iron_march_nodes$name[duplicated(iron_march_nodes$name)]
+
+sum(is.na(iron_march_nodes)) #68
+iron_march_nodes <- na.omit(iron_march_nodes) # Remove the NAs 
+sum(is.na(iron_march_nodes)) #0
+
+write.csv(iron_march_nodes,"iron_march_nodes.csv", row.names = FALSE)
+
+#------ Gephi Prep -------
+
+iron_march_nodes_gephi <- iron_march_nodes
+iron_march_nodes_gephi<- select(iron_march_nodes, id, name, role, 'start date', 'end date') 
+
+names(iron_march_nodes_gephi)[names(iron_march_nodes_gephi) == "name"] <- "label"
+
+iron_march_nodes_gephi$`start date` <- as.Date(iron_march_nodes_gephi$`start date`, "%d%b%Y %H:%M:%S")
+iron_march_nodes_gephi$`end date` <- as.Date(iron_march_nodes_gephi$`end date`, "%d%b%Y %H:%M:%S")
+class(iron_march_nodes_gephi$`start date`)
+class(iron_march_nodes_gephi$`end date`)
+
+table(iron_march_nodes_gephi$role)
+
+write.csv(iron_march_nodes_gephi,"iron_march_nodes_gephi.csv", row.names = FALSE)
+
+#AWD Member             AWD Recruiter                AWD Seeker          Iron March Admin          Iron March Event         Iron March Member 
+# 9                         9                        30                         6                        93                      1139 
+# Iron March Post    National Action Member National Action Recruiter    National Action Seeker 
+# 5999                         8                         3                         3 
+
+```
+
+## edge list - Member Comments -> Posts/Topics
+
+Members who comment on a Post/Topic
+
+```{r}
+library(tidyverse)
+
+#------ Posts -------
+
+# Source -> Target 
+# Author Comments -> Posts
+colnames(iron_march_core_forum_posts_names1)
+iron_march_core_forum_posts_comments_edges <- iron_march_core_forum_posts_names1
+iron_march_core_forum_posts_comments_edges <- select(iron_march_core_forum_posts_names1, index_author_name, index_title, index_date_created, index_date_created_half) # select the source and target for posts
+
+#tibble(iron_march_core_forum_posts_comments_edges)
+
+# NAs in edge list
+sum(is.na(iron_march_core_forum_posts_comments_edges$index_title)) # 263 nas
+iron_march_core_forum_posts_comments_edges <- na.omit(iron_march_core_forum_posts_comments_edges)
+sum(is.na(iron_march_core_forum_posts_comments_edges$index_title)) # 0 nas
+
+#---- Source & Target ------
+names(iron_march_core_forum_posts_comments_edges)[names(iron_march_core_forum_posts_comments_edges) == "index_author_name"] <- "source" #match core_members
+names(iron_march_core_forum_posts_comments_edges)[names(iron_march_core_forum_posts_comments_edges) == "index_title"] <- "target" #match core_members
+names(iron_march_core_forum_posts_comments_edges)[names(iron_march_core_forum_posts_comments_edges) == "index_date_created"] <- "timestamp" #match core_members
+names(iron_march_core_forum_posts_comments_edges)[names(iron_march_core_forum_posts_comments_edges) == "index_date_created_half"] <- "time half" #match core_members
+iron_march_core_forum_posts_comments_edges$type <- "Comment"
+#iron_march_core_forum_posts_comments_edges$weight <- 1
+
+head(iron_march_core_forum_posts_comments_edges)
+
+describe(iron_march_core_forum_posts_comments_edges)
+
+```
+
+## edge list - Post Author Create -> Posts/Topics
+
+Members who create a Post/Topic
+
+```{r}
+library(tidyverse)
+
+#------ Posts -------
+
+# Source -> Target 
+# Author Comments -> Posts
+colnames(iron_march_core_forum_posts_names1)
+#describe(iron_march_core_forum_posts_names1)
+
+iron_march_core_forum_posts_edges <- iron_march_core_forum_posts_names1
+
+# ----> figuring out how to apply the timestamp of post created <-----
+# Selecting the date created just applies all the dates created for all posts and comments
+# i just need the date created for the post
+iron_march_core_forum_posts_edges_time <- 
+sqldf("SELECT DISTINCT *
+FROM iron_march_core_forum_posts_edges 
+WHERE [index_class] = 'IPS\\forums\\Topic\\Post'
+AND [index_item_id] = 160
+ORDER BY index_date_created")
+
+# Cut down to posts created 
+# Posts: Date created = date updated: no comments, so no interaction - lose more posts created but okay given we don't miss interactions
+# Posts: Date created != date updated: comments, and gives me date post was created
+
+iron_march_core_forum_posts_edges <- 
+sqldf("SELECT DISTINCT index_item_author_name, index_title, index_date_created, index_date_created_half
+FROM iron_march_core_forum_posts_edges 
+WHERE [index_class] = 'IPS\\forums\\Topic\\Post'
+AND [index_date_created] != [index_date_updated]
+ORDER BY index_item_author_name")
+describe(iron_march_core_forum_posts_edges)
+
+#iron_march_core_forum_posts_edges <- select(iron_march_core_forum_posts_names1, index_item_author_name, index_title) # select the source and target for posts
+
+#tibble(iron_march_core_forum_posts_comments_edges)
+
+# NAs in edge list
+sum(is.na(iron_march_core_forum_posts_edges$index_title)) # 263 nas
+sum(is.na(iron_march_core_forum_posts_edges$index_item_author_name)) # 960 nas
+iron_march_core_forum_posts_edges <- na.omit(iron_march_core_forum_posts_edges)
+sum(is.na(iron_march_core_forum_posts_edges$index_title)) # 0 nas
+
+#---- Source & Target ------
+names(iron_march_core_forum_posts_edges)[names(iron_march_core_forum_posts_edges) == "index_item_author_name"] <- "source" #match core_members
+names(iron_march_core_forum_posts_edges)[names(iron_march_core_forum_posts_edges) == "index_title"] <- "target" #match core_members
+names(iron_march_core_forum_posts_edges)[names(iron_march_core_forum_posts_edges) == "index_date_created"] <- "timestamp" #match core_members
+names(iron_march_core_forum_posts_edges)[names(iron_march_core_forum_posts_edges) == "index_date_created_half"] <- "time half" #match core_members
+
+iron_march_core_forum_posts_edges$type <- "Post"
+#iron_march_core_forum_posts_edges$weight <- 2
+head(iron_march_core_forum_posts_edges)
+
+```
+
+## edge list - Private Messages (Member -> Member)
+
+Members who send a private message to another member
+
+```{r}
+library(tidyverse)
+
+#------ Messages -------
+
+# Source -> Target 
+
+#colnames(iron_march_private_messages)
+# 20514 rows
+iron_march_private_messages_edges <- iron_march_private_messages
+iron_march_private_messages_edges <- select(iron_march_private_messages, msg_sender_name, msg_receiver_name,msg_date, msg_date_half) # select the source and target for posts
+
+#tibble(iron_march_core_forum_posts_comments_edges)
+
+#---- Source & Target ------
+names(iron_march_private_messages_edges)[names(iron_march_private_messages_edges) == "msg_sender_name"] <- "source"
+names(iron_march_private_messages_edges)[names(iron_march_private_messages_edges) == "msg_receiver_name"] <- "target" 
+names(iron_march_private_messages_edges)[names(iron_march_private_messages_edges) == "msg_date"] <- "timestamp"
+names(iron_march_private_messages_edges)[names(iron_march_private_messages_edges) == "msg_date_half"] <- "time half" 
+
+iron_march_private_messages_edges$type <- "Message"
+#iron_march_private_messages_edges$weight <- 3
+
+head(iron_march_private_messages_edges)
+
+# NAs in dataset
+sum(is.na(iron_march_private_messages_edges$source)) #2231
+sum(is.na(iron_march_private_messages_edges$target)) #2478
+
+```
+## Final edge list - Merge all edge lists into one
+```{r}
+#iron_march_core_forum_posts_comments_edges = comment
+#iron_march_core_forum_posts_edges = posts
+#iron_march_private_messages_edges = messages
+
+iron_march_edges <- rbind(iron_march_private_messages_edges, iron_march_core_forum_posts_edges, iron_march_core_forum_posts_comments_edges) # bind all 
+
+describe(iron_march_edges)
+# 191547 source
+# 191427 target
+
+write.csv(iron_march_edges,"iron_march_edges.csv", row.names = FALSE)
+
+# ----> Create Source ID Column <-------
+iron_march_edges_ids <- iron_march_edges  # New Dataframe
+iron_march_edges_ids$source_id <- NA # Add column to fill later
+
+iron_march_nodes_source <- iron_march_nodes
+names(iron_march_nodes_source)[names(iron_march_nodes_source) == "id"] <- "source_id" #match iron_march_edges_ids
+names(iron_march_nodes_source)[names(iron_march_nodes_source) == "name"] <- "source" #match iron_march_edges_ids
+
+iron_march_edges_ids$source_id <- iron_march_nodes_source$source_id[match(iron_march_edges_ids$source, iron_march_nodes_source$source)]; # Match the ID and name source
+
+# ----> Create Target ID Column <-------
+
+iron_march_edges_ids$target_id <- NA # Add column to fill later
+
+iron_march_nodes_target<- iron_march_nodes
+names(iron_march_nodes_target)[names(iron_march_nodes_target) == "id"] <- "target_id" #match iron_march_edges_ids
+names(iron_march_nodes_target)[names(iron_march_nodes_target) == "name"] <- "target" #match iron_march_edges_ids
+
+iron_march_edges_ids$target_id <- iron_march_nodes_target$target_id[match(iron_march_edges_ids$target, iron_march_nodes_target$target)]; # Match the ID 
+
+head(iron_march_edges_ids) # check it worked - it does
+describe(iron_march_edges_ids) # same row count
+
+# ----> Cleanup for network object <-------
+
+# check for NAs - if there are NAs in my edge list it means they don't appear in my node list
+sum(is.na(iron_march_edges_ids$source_id)) #0
+sum(is.na(iron_march_edges_ids$target_id)) #53
+
+iron_march_edges_ids <- na.omit(iron_march_edges_ids) # Remove the NAs 
+
+sum(is.na(iron_march_edges_ids$source_id)) #0
+sum(is.na(iron_march_edges_ids$target_id)) #0
+
+iron_march_edges_ids_prep <- select(iron_march_edges_ids, source_id, target_id, type, timestamp, "time half")
+
+#iron_march_edges_ids_prep2 <- iron_march_edges_ids_prep
+# Create weights of messages
+#iron_march_edges_ids_prep2 <- iron_march_edges_ids_prep2 %>%  
+#  group_by(source_id, target_id) %>%
+#  summarise(weight = n()) %>% 
+#  ungroup()
+# head(iron_march_edges_ids_prep2)
+
+  
+# ----> Gephi Prep <-------
+
+iron_march_edges_gephi <- iron_march_edges_ids_prep
+
+names(iron_march_edges_gephi)[names(iron_march_edges_gephi) == "source_id"] <- "source" #match iron_march_edges_ids
+names(iron_march_edges_gephi)[names(iron_march_edges_gephi) == "target_id"] <- "target" 
+names(iron_march_edges_gephi)[names(iron_march_edges_gephi) == "timestamp"] <- "date" #match iron_march_edges_ids
+names(iron_march_edges_gephi)[names(iron_march_edges_gephi) == "type"] <- "connection" #match iron_march_edges_ids
+
+iron_march_edges_gephi$date <- as.Date(iron_march_edges_gephi$date, "%d%b%Y %H:%M:%S")
+class(iron_march_edges_gephi$date)
+
+sum(is.na(iron_march_edges_gephi)) #0
+sum(is.na(iron_march_edges_ids$target_id)) #53
+
+# Add ID - Gephi does not recognise edges as unique 
+colnames(iron_march_edges_gephi)
+iron_march_edges_gephi <- iron_march_edges_gephi %>% rowid_to_column("id")
+write.csv(iron_march_edges_gephi,"iron_march_edges_gephi.csv", row.names = FALSE)
+```
+
+```{r}
+#----> NetworkX Prep <-----
+
+# Messages between users 
+iron_march_edges_networkx_contagion <- iron_march_edges_gephi
+
+# Simple contagion model
+iron_march_edges_networkx <- select(iron_march_edges_networkx_contagion, source, target)
+write.csv(iron_march_edges_networkx,"iron_march_edges_networkx.csv", row.names = FALSE)
+
+# Create weights of messages
+iron_march_edges_networkx_contagion <- iron_march_edges_networkx_contagion %>%  
+  group_by(source, target) %>%
+  summarise(weight = n()) %>% 
+  ungroup()
+#iron_march_edges_networkx_contagion
+
+write.table(iron_march_edges_networkx_contagion,"iron_march_edges_networkx_contagion.txt", sep = "\t", row.names = FALSE, col.names = FALSE)
+
+# Comments from users 
+
+iron_march_edges_networkx <- iron_march_edges
+names(iron_march_edges_networkx)[names(iron_march_edges_networkx) == "time half"] <- "half" #match iron_march_edges_ids
+#head(iron_march_edges_networkx,5)
+
+iron_march_edges_networkx_contagion_comments <-
+sqldf("SELECT source, target
+FROM iron_march_edges_networkx 
+WHERE  [type] = 'Comment'
+AND [half] IN ('2016.1', '2016.2', '2017.1', '2017.2')
+ORDER BY timestamp DESC")
+
+# Create weights of comments
+iron_march_edges_networkx_contagion_comments <- iron_march_edges_networkx_contagion_comments %>%  
+  group_by(source, target) %>%
+  summarise(weight = n()) %>% 
+  ungroup()
+
+# Remove text that causes networkx to break code
+iron_march_edges_networkx_contagion_comments$target<-gsub('[\"]',"",as.character(iron_march_edges_networkx_contagion_comments$target))
+
+sqldf("SELECT DISTINCT target
+FROM iron_march_edges_networkx_contagion_comments 
+WHERE [target] LIKE 'Liberal%'
+")
+
+#tibble(iron_march_edges_networkx_contagion_comments)
+
+write.table(iron_march_edges_networkx_contagion_comments,"iron_march_edges_networkx_contagion_comments.txt", sep = "\t", row.names = FALSE, col.names = FALSE)
+
+# Comments and messages from users 
+# Focus on 2016 - 2017
+
+iron_march_edges_networkx_contagion_all_edges <-
+sqldf("SELECT source, target
+FROM iron_march_edges_networkx 
+WHERE  [type] = 'Comment'
+OR  [type] = 'Message'
+AND [half] IN ('2016.1', '2016.2', '2017.1', '2017.2')
+ORDER BY timestamp DESC")
+
+# Create weights 
+iron_march_edges_networkx_contagion_all_edges <- iron_march_edges_networkx_contagion_all_edges %>%  
+  group_by(source, target) %>%
+  summarise(weight = n()) %>% 
+  ungroup()
+
+iron_march_edges_networkx_contagion_all_edges$target<-gsub('[\"]',"",as.character(iron_march_edges_networkx_contagion_all_edges$target))
+
+tibble(iron_march_edges_networkx_contagion_comments)
+
+write.table(iron_march_edges_networkx_contagion_all_edges,"iron_march_edges_networkx_contagion_all_edges.txt", sep = "\t", row.names = FALSE, col.names = FALSE)
+
+# Resilience Model
+iron_march_edges_networkx_resilience <- select(iron_march_edges_gephi, source, target)
+
+# Create weights of messages
+iron_march_edges_networkx_resilience <- iron_march_edges_networkx_resilience %>%  
+  group_by(source, target) %>%
+  summarise(weight = n()) %>% 
+  ungroup()
+iron_march_edges_networkx_resilience
+
+write.table(iron_march_edges_networkx_resilience,"iron_march_edges_networkx_resilience.txt", sep = "\t", row.names = FALSE, col.names = TRUE)
+
+```
+
+## CREATING THE NETWORK
+
+```{r}
+library(igraph)
+iron_march_network <- graph_from_data_frame(d=iron_march_edges_ids_prep, vertices=iron_march_nodes, directed=T) 
+iron_march_network
+
+E(iron_march_network)       # The edges of the "net" object
+V(iron_march_network)       # The vertices of the "net" object
+
+# Specific data descrptions on attributes
+edgetypes <- E(iron_march_network)$type  # Edge attribute "type"
+roletypes <- V(iron_march_network)$role # Vertex attribute "role"
+
+edgetypestable <- table(edgetypes) # create table
+roletypestable <- table(roletypes) # create table
+
+edgetypesdf <- as.data.frame(edgetypestable) # create dataframe
+edgetypesdf
+
+roletypesdf <- as.data.frame(roletypestable) # create dataframe
+roletypesdf 
+
+# Node Types
+roletypesdf %>% 
+  mutate(roletypes = fct_reorder(roletypes, Freq)) %>%
+  ggplot( aes(x=roletypes, y=Freq)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    coord_flip() +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Breakdown of Iron March Node Roles", subtitle = "All Node Roles Included") +
+  xlab("Type of Role") + ylab("Frequency of Role")  +
+geom_label(
+    aes(label=Freq), 
+    nudge_x = 0, nudge_y = 15, 
+    check_overlap = T,
+    size = 3) 
+
+# without Posts
+roletypesdf %>% filter(roletypes != c("Iron March Post", "Iron March Event")) %>% # exclude IM Post 
+  mutate(roletypes = fct_reorder(roletypes, Freq)) %>%
+  ggplot( aes(x=roletypes, y=Freq)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    coord_flip() +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Breakdown of Iron March Node Roles", subtitle = "Node Role Members Only") +
+  xlab("Type of Role") + ylab("Frequency of Role")  +
+geom_label(
+    aes(label=Freq), 
+    nudge_x = 0, nudge_y = 5, 
+    check_overlap = T,
+    size = 3)
+
+# Edge Types
+edgetypesdf %>% 
+  mutate(edgetypes = fct_reorder(edgetypes, Freq)) %>%
+  ggplot( aes(x=edgetypes, y=Freq)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    coord_flip() +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Breakdown of Iron March Edges", subtitle = "All Edges Roles Included") +
+  xlab("Type of Link") + ylab("Frequency of Link")  +
+geom_label(
+    aes(label=Freq), 
+    nudge_x = 0, nudge_y = 15, 
+    check_overlap = T,
+    size = 3) 
+```
+
+```{r}
+# Find nodes and edges by attribute:
+# (that returns oblects of type vertex sequence/edge sequence)
+im_members_only <- V(iron_march_network)[role!="Iron March Post"]
+E(iron_march_network)[type=="Comment"]
+
+```
+# Alpha Centrality
+```{r}
+# Calculable centrality types based on the graph structure
+library(CINNA)
+pr_cent<-proper_centralities(iron_march_network)
+
+# It is a measure of centrality of nodes within a graph. 
+# It is an adaptation of eigenvector centrality with the addition that nodes are imbued with importance from external sources.
+
+alpha_network <- alpha_centrality(iron_march_network, alpha=0.9)
+
+write.csv(alpha_network, "alpha_network_scores.csv", sep = ",",
+            row.names = TRUE, col.names = FALSE)
+
+alpha_df <- read.csv(file="alpha_network_scores.csv", header=FALSE, sep=",")
+names(alpha_df) <- c('id', 'scores')
+alpha_df = alpha_df[-1,]
+head(alpha_df)
+
+
+alpha_df_2 = merge(x=alpha_df,y=iron_march_nodes,by="id")
+
+sqldf("SELECT*
+FROM alpha_df_2
+WHERE [role] != 'Iron March Post'
+ORDER BY scores DESC
+LIMIT 10
+")
+
+```
+# Density
+```{r}
+# The proportion of present edges from all possible ties.
+edge_density(iron_march_network, loops=F)
+# 0.003391462
+```
+
+# avg path length
+```{r}
+mean_distance(iron_march_network)
+# 3.271662
+```
+
+# diameter
+```{r}
+diameter(iron_march_network, directed=T)
+# 24
+
+# Which two vertices are the furthest apart in the graph ?
+farthest_vertices(iron_march_network) 
+# Totalitariana, R.B Cornwall
+# [1] Totalitariana          Crimson_Fasces         Владимир_Борисов       Mortimer              
+# [5] Александр Славрос      Massgrave              Esoteric Jim Saleamist nmodzeh               
+# [9] R.B Cornwall 
+
+#returns a path with the actual diameter. 
+# If there are many shortest paths of the length of the diameter, then it returns the first one found.
+# Shows the path sequence between two furthest apart vertices.
+diam <- get_diameter(iron_march_network, directed=T)
+diam
+```
+#NETWORK STATS SUMMARY
+```{r}
+edge_density(iron_march_network, loops=F) # [1] 0.003391462
+centralization.degree(iron_march_network, mode = "all") # 0.6920755
+centralization.betweenness(iron_march_network, directed = TRUE) # 0.02392442
+diameter(iron_march_network, directed=T) # 8
+mean_distance(iron_march_network) # 3.271662
+centralization.degree(iron_march_network, mode = "in") #1.387356
+centralization.degree(iron_march_network, mode = "out") #1.048942
+
+
+wtc <- cluster_walktrap(iron_march_network)
+modularity(wtc)
+modularity(iron_march_network, membership(wtc)) # 0.2665975
+
+alpha_centrality(iron_march_network, alpha=0.9)
+
+```
+
+# Bridges 
+```{r}
+# Александр Славрос is acting as bridge between two nodes who are the furthest apart
+# Further explained below using ego graph:
+
+#The first argument of ego() is the graph object, 
+#the second argument is the maximum number of connections between the vertices, 
+#the third argument is the vertex of interest, 
+#and the fourth argument determines if you are considering connections going out or into the vertex of interest.
+# https://rpubs.com/yanalytics/network-analysis-directed1
+
+# Identify vertices that are reachable within two connections from vertex Александр Славрос
+ego(iron_march_network, 2, 'Александр Славрос', mode = c('out'))
+round(5362/7415*100, digits = 2)
+# 5362/7415 or 72.31% of all vertices can be reached within two steps from Александр Славрос
+
+ego(iron_march_network, 2, 'Александр Славрос', mode = c('in'))
+round(434/7415*100, digits = 2)
+# 434/7415 or just 5.85% of all vertices can be reached within two steps to Александр Славрос
+
+```
+
+# Connections to terrorists
+```{r}
+
+library(plyr)
+
+# Identify vertices that are reachable within two connections from AWD Member
+awdmember_steps_out <- ego(iron_march_network, 2, V(iron_march_network)[role=="AWD Member"], mode = c('out'))
+awdmember_steps_out_df <- rbind.fill(lapply(awdmember_steps_out, function(x)as.data.frame(t(names(x)))))
+
+# Identify vertices that are reachable within two connections from AWD Reruiters
+awdrecruiter_steps_out <- ego(iron_march_network, 2, V(iron_march_network)[role=="AWD Recruiter"], mode = c('out'))
+awdrecruiter_steps_out_df <- rbind.fill(lapply(awdrecruiter_steps_out, function(x)as.data.frame(t(names(x)))))
+
+# Easy to be reached by a recruiter in 2 steps - combination of admins, popular posts, and specific 
+# Growth of the Soil 3981/7415 
+round(4042/7415*100, digits = 2) # 53.69%
+
+# Atlas 3685/7415 
+round(3685/7415*100, digits = 2) # 49.7%
+
+# The Yank 3446/7415 
+round(3446/7415*100, digits = 2) # 46.47%
+
+# Rover 117/7415 
+round(117/7415*100, digits = 2) # 1.58%
+
+
+# Identify vertices that can reach AWD Member within two connections
+awdmember_steps_in <- ego(iron_march_network, 2, V(iron_march_network)[role=="AWD Member"], mode = c('in'))
+awdmember_steps_in
+
+# Identify vertices that can reach AWD Recruiters within two connections
+awdrecruiter_steps_in <- ego(iron_march_network, 2, V(iron_march_network)[role=="AWD Recruiter"], mode = c('in'))
+awdrecruiter_steps_in
+
+round(342/7415*100, digits = 2) #Odin = 4.61%
+round(19/7415*100, digits = 2) #Rover = 0.26%
+
+
+# Harder to reach a recruiter in 2 steps
+# 228/7415 Growth of the Soil 
+# 128/7415 Atlas
+# 102/7415 Xav
+# 1/7415 Deutsches_Vaterland
+# 14/7415 Rover
+# 20/7415 rekse_  
+# 49/7415 Saor
+# 25/7415 Black Israelite
+# 50/7415 Jason
+
+# 617/7415 or just 8.2% of call vertices can reach an AWD Recruiter in two steps
+```
+
+# National Action
+```{r}
+# Identify vertices that are reachable within two connections from NA Member
+namember_steps_out <- ego(iron_march_network, 2, V(iron_march_network)[role=="National Action Member"], mode = c('out'))
+namember_steps_out 
+
+round(6948/7415*100, digits = 2) # 93.7% - IntegralCymru
+
+# Identify vertices that are reachable within two connections from NA Reruiters
+narecruiter_steps_out <- ego(iron_march_network, 2, V(iron_march_network)[role=="National Action Recruiter"], mode = c('out'))
+narecruiter_steps_out
+
+# Easy to be reached by a recruiter in 2 steps - combination of admins, popular posts, and specific 
+round(3782/7415*100, digits = 2) # 51% - EvilCatholicNaziGoy
+round(3229/7415*100, digits = 2) # 43.55% - HagiSS
+round(1284/7415*100, digits = 2) # 17.32% - Insurrectionist
+
+# Identify vertices that can reach AWD Member within two connections
+namember_steps_in <- ego(iron_march_network, 2, V(iron_march_network)[role=="National Action Member"], mode = c('in'))
+namember_steps_in
+
+# Identify vertices that can reach AWD Recruiters within two connections
+narecruiter_steps_in <- ego(iron_march_network, 2, V(iron_march_network)[role=="National Action Recruiter"], mode = c('in'))
+narecruiter_steps_in
+
+round(342/7415*100, digits = 2)
+round(9/7415*100, digits = 2)
+
+```
+# Connections to mods and admins
+```{r}
+# Identify vertices that are reachable within two connections from mods
+mods_steps_out <- ego(iron_march_network, 2, V(iron_march_network)[role=="Iron March Moderator"], mode = c('out'))
+mods_steps_out_df <- rbind.fill(lapply(mods_steps_out, function(x)as.data.frame(t(names(x)))))
+
+write.csv(mods_steps_out_df, "mods_steps_out_df.csv")
+
+# Identify vertices that are reachable within two connections to mods
+mods_steps_in <- ego(iron_march_network, 2, V(iron_march_network)[role=="Iron March Moderator"], mode = c('in'))
+mods_steps_in_df <- rbind.fill(lapply(mods_steps_in, function(x)as.data.frame(t(names(x)))))
+
+```
+
+```{r}
+# 276 rows with connections
+sqldf("SELECT*
+FROM mods_steps_in_df 
+WHERE [V2] != 'NA'
+")
+
+# How many times does admins appear as the last node before a moderator?
+# Slavros - 37/276 times - 13%
+# All admins - 43/276 times - 16%
+v2_common <- 
+sqldf("SELECT V2, 
+COUNT(V2) as freq
+FROM mods_steps_in_df 
+WHERE ([V2] = 'Александр Славрос' 
+OR [V2] = 'Daddy Terror' 
+OR [V2] = 'PhalNat' 
+OR [V2] = 'Woman in Black' 
+OR [V2] = 'Ritz' 
+OR [V2] = 'American_Blackshirt')
+AND [V2] != 'NA'
+GROUP BY V2
+")
+
+V2_PLOT <- v2_common %>% 
+  mutate(V2 = fct_reorder(V2, freq)) %>%
+  ggplot(aes(x=V2, y=freq)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    coord_flip() +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Last Step") +
+  xlab("Admin Name") + ylab("Appearances") +
+geom_label(
+    aes(label=freq), 
+    nudge_x = 0, nudge_y = 1, 
+    check_overlap = T,
+    size = 3)  +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x=element_blank())  
+
+v3_common <- 
+sqldf("SELECT V3, 
+COUNT(V3) as freq
+FROM mods_steps_in_df 
+WHERE ([V3] = 'Александр Славрос' 
+OR [V3] = 'Daddy Terror' 
+OR [V3] = 'PhalNat' 
+OR [V3] = 'Woman in Black' 
+OR [V3] = 'Ritz' 
+OR [V3] = 'American_Blackshirt')
+AND [V3] != 'NA'
+GROUP BY V3
+")
+
+V3_PLOT <- v3_common %>% 
+  mutate(V3 = fct_reorder(V3, freq)) %>%
+  ggplot(aes(x=V3, y=freq)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    coord_flip() +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Second Last Step") +
+  xlab("Admin Name") + ylab("Appearances") +
+geom_label(
+    aes(label=freq), 
+    nudge_x = 0, nudge_y = 1, 
+    check_overlap = T,
+    size = 3)  +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x=element_blank())  
+
+grid.arrange(V2_PLOT, V3_PLOT, ncol=2, 
+             left="Admin Name", 
+             bottom = "Frequency in Step",  
+             top = "Positions of Admins as Bridges to Moderators (n = 276)")
+
+```
+
+```{r}
+# Find nodes with highest connections 3 steps away
+vertices <- rowSums(!is.na(mods_steps_in_df))
+vertices <- as.data.frame(vertices)
+v1_mod <- select(mods_steps_in_df, V1)
+mod_vertices_count <- cbind(v1_mod, vertices)
+head(mod_vertices_count)
+
+# Moderators with highest connections to nodes by 3 steps (indegree)
+mod_vertices_count_top <- 
+sqldf("SELECT*
+FROM mod_vertices_count 
+ORDER BY vertices DESC
+LIMIT 10")
+
+mod_vertices_count_top %>% 
+  mutate(V1 = fct_reorder(V1, vertices)) %>%
+  ggplot(aes(x=V1, y=vertices)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    coord_flip() +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Moderators Most Connected By 3 Steps from Other Nodes", subtitle = "Top 10 Moderators") +
+  xlab("Moderator Name") + ylab("Vertices Connected") +
+geom_label(
+    aes(label=vertices), 
+    nudge_x = 0, nudge_y = 25, 
+    check_overlap = T,
+    size = 3)
+
+```
+
+# Node degrees
+```{r}
+# 'degree' has a mode of 'in' for in-degree, 'out' for out-degree,
+# and 'all' or 'total' for total degree. 
+deg <- degree(iron_march_network, mode="all")
+degree(iron_march_network)
+```
+# Degree distribution
+
+(Barabasi, 2014)
+
+Superlinear Regime (α>1)
+- The high-degree nodes are disproportionately attractive. 
+- A winner-takes-all dynamics leads to a hub-and-spoke topology. 
+- In this configuration the earliest nodes become super hubs and all subsequent nodes link to them.
+
+```{r}
+# List of degrees
+G.degrees <- degree(iron_march_network)
+
+# Count the frequencies of each degree
+G.degree.histogram <- as.data.frame(table(G.degrees))
+
+# Need to convert the first column to numbers, otherwise
+# the log-log thing will not work (that's fair...)
+G.degree.histogram[,1] <- as.numeric(G.degree.histogram[,1])
+
+# Plot
+ggplot(G.degree.histogram, aes(x = G.degrees, y = Freq)) +
+  geom_point() +
+  scale_x_continuous("Degree\n(nodes with this amount of connections)",
+                     breaks = c(1, 3, 10, 30, 100, 300),
+                     trans = "log10") +
+  scale_y_continuous("Frequency\n(how many of them)",
+                     breaks = c(1, 3, 10, 30, 100, 300, 1000),
+                     trans = "log10") +
+  ggtitle("Degree Distribution (log-log)") +
+  theme_bw()
+
+```
+
+# Degree (number of ties)
+```{r}
+V(iron_march_network)$degree <- degree(iron_march_network)                        # Degree centrality
+V(iron_march_network)$eig <- evcent(iron_march_network)$vector                    # Eigenvector centrality
+V(iron_march_network)$hubs <- hub.score(iron_march_network)$vector                # "Hub" centrality
+V(iron_march_network)$authorities <- authority.score(iron_march_network)$vector   # "Authority" centrality
+V(iron_march_network)$closeness <- closeness(iron_march_network)                  # Closeness centrality
+V(iron_march_network)$betweenness <- betweenness(iron_march_network) 
+
+```
+
+## Centrality Degree Measures
+```{r}
+Degree.Directed <- degree(iron_march_network)
+Indegree <- degree(iron_march_network, mode="in")
+Outdegree <- degree(iron_march_network, mode="out")
+CentreDegree <- centr_degree(iron_march_network, mode="in", normalized=T)
+
+# Make a histogram of out-degrees
+hist(Indegree, breaks = 20)
+hist(Outdegree, breaks = 20)
+hist(Degree.Directed, breaks = 20)
+
+CompareDegree <- cbind(Degree.Directed, Indegree, Outdegree, CentreDegree)
+head(CompareDegree)
+
+CompareDegree
+
+# Highest number of degrees - most central node
+V(iron_march_network)$name[degree(iron_march_network)==max(degree(iron_march_network))]
+max(degree(iron_march_network))
+# "Liberal Degeneration" Iron March Post # 10,311
+
+# Highest number of degrees - most central node
+# Betweenness centrality reflects how connected nodes are. 
+# More precisely, it provides a measure of how important noes are for information flow between nodes in a network. 
+V(iron_march_network)$name[betweenness(iron_march_network)==max(betweenness(iron_march_network))]
+max(betweenness(iron_march_network))
+# "Александр Славрос" Iron March Admin # 1286664
+
+# df with degrees
+iron_march_degree <- data.frame(nodename = V(iron_march_network)$name, noderole = V(iron_march_network)$role,
+                         Degree   = Degree.Directed)
+
+iron_march_indegree <- data.frame(nodename = V(iron_march_network)$name, noderole = V(iron_march_network)$role,
+                         InDegree   = Indegree)
+
+iron_march_outdegree <- data.frame(nodename = V(iron_march_network)$name, noderole = V(iron_march_network)$role,
+                         OutDegree   = Outdegree)
+
+iron_march_centdegree <- data.frame(nodename = V(iron_march_network)$name, noderole = V(iron_march_network)$role,
+                         CentreDegree   = CentreDegree)
+
+iron_march_indegree_table <- data.frame(InDegree   = Indegree)
+iron_march_outdegree_table <- data.frame(OutDegree   = Outdegree)
+iron_march_centdegree_table <- data.frame(CentralDegree   = CentreDegree)
+CompareIronDegree <- cbind(iron_march_degree, iron_march_indegree_table, iron_march_outdegree_table, iron_march_centdegree_table)
+head(CompareIronDegree)
+
+```
+
+# Plots
+
+```{r}
+
+# Degree Count
+degree_top <-
+sqldf("SELECT nodename, noderole, Degree
+FROM iron_march_degree 
+GROUP BY nodename
+HAVING [Degree] > 3000
+ORDER BY Degree DESC")
+
+degree_top %>% 
+  mutate(nodename = fct_reorder(nodename, Degree)) %>%
+  ggplot(aes(x=nodename, y=Degree)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    coord_flip() +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Top Nodes' Degree Measurement", subtitle = "Nodes Have >3000 Degrees") +
+  xlab("Node") + ylab("Degrees") +
+geom_label(
+    aes(label=Degree), 
+    nudge_x = 0, nudge_y = 25, 
+    check_overlap = T,
+    size = 3)
+
+degree_top %>% 
+  mutate(noderole = fct_reorder(noderole, Degree)) %>%
+  ggplot(aes(x=noderole, y=Degree)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    coord_flip() +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Top Nodes' Degree Measurement by Role", subtitle = "Nodes Have >3000 Degrees") +
+  xlab("Node") + ylab("Degrees") 
+```
+
+```{r}
+# Indegree Count
+in_degree_top <-
+sqldf("SELECT nodename, noderole, InDegree
+FROM iron_march_indegree 
+GROUP BY nodename
+HAVING [InDegree] > 1000
+ORDER BY InDegree DESC")
+
+ #in_degree_plot  <- 
+   in_degree_top %>% 
+  mutate(nodename = fct_reorder(nodename, InDegree)) %>%
+  ggplot( aes(x=nodename, y=InDegree)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    coord_flip() +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("InDegrees", subtitle = "Nodes Have >1000 InDegrees") +
+  xlab("Node") + ylab("InDegrees") +
+geom_label(
+    aes(label=InDegree), 
+    nudge_x = 0, nudge_y = 25, 
+    check_overlap = T,
+    size = 3) 
+
+# Outdegree Count
+
+#out_degree_top <- iron_march_outdegree %>%
+#  group_by(nodename, noderole) %>%
+#filter(OutDegree >2438)  %>%
+#arrange(desc(OutDegree))
+#out_degree_top
+
+out_degree_top <-
+sqldf("SELECT nodename, noderole, OutDegree
+FROM iron_march_outdegree 
+GROUP BY nodename
+HAVING [OutDegree] > 2438
+ORDER BY OutDegree DESC")
+
+# Alexander Slavros = Александр Славрос
+# Ben Raymond = Daddy Terror
+# Boris Mihajlovic = MOONLORD https://www.cbc.ca/news/canada/calgary/navy-reservist-iron-march-data-1.5382424
+# Leonid Mihaljov = Myrrysmies [modeator]
+
+ #out_degree_plot <- 
+   out_degree_top %>% 
+  mutate(nodename = fct_reorder(nodename, OutDegree)) %>%
+  ggplot( aes(x=nodename, y=OutDegree)) + 
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    coord_flip() +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("OutDegrees", subtitle = "Nodes Have >2438 OutDegrees") +
+  xlab("Node") + ylab("OutDegrees") +
+geom_label(
+    aes(label=OutDegree), 
+    nudge_x = 0, nudge_y = 25, 
+    check_overlap = T,
+    size = 3)   
+ 
+#+
+ # theme(axis.title.x=element_blank(),
+  #      axis.text.x=element_blank(),
+   #      axis.title.y = element_blank(),
+    #    axis.ticks.x=element_blank()) 
+
+```
+# Closeness
+https://slcladal.github.io/net.html#Network_Statistics
+```{r}
+# Closeness centrality refers to the shortest paths between nodes. 
+# The distance between two nodes represents the length of the shortest path between them. 
+# The closeness of a node is the average distance from that node to all other nodes.
+V(iron_march_network)$name[closeness(iron_march_network)==max(closeness(iron_march_network))]
+max(closeness(iron_march_network))
+
+#Suecorum Rex
+
+```
+# Reciprocity & Clustering Coeff
+```{r}
+# ‘Reciprocity’ calculates the proportion of mutual edges relative to all existing edges. 
+# This is relevant for directed graphs.
+reciprocity(graph = iron_march_network)
+# 0.07886874
+
+# ‘Clustering coefficient’ (also referred to as transitivity, or cliquishness) is the probability that the two neighbours of a vertex are neighbours of each other. 
+# This is also called a triangle.
+
+transitivity(graph = iron_march_network)
+# 0.01707089
+```
+
+# CONSTRAINTS/BURT/HOLES
+
+```{r}
+# 0 - 1: Lower the actor’s Burt’s constraint score, lesser its behavior is constrained by other nodes in the network
+# 0, if it is involved in many incomplete triads 
+# 1, if it is involved in many complete triads
+
+burt_im <- constraint(iron_march_network)
+
+```
+
+## CREATING THE NETWORK - SPLIT BY TIMING
+
+```{r}
+
+#------ Splitting Node List -------
+
+# ERROR WHEN I SPLIT NODES BY TIME - check
+
+iron_march_nodes_before <-
+sqldf("SELECT*
+FROM iron_march_nodes 
+WHERE  ([start_half] = '2014.1'
+OR [start_half] = '2014.2'
+OR [start_half]= '2013.1'
+OR [start_half]= '2013.2'
+OR [start_half] = '2012.1'
+OR [start_half] = '2012.2'
+OR [start_half] = '2011.2')
+")
+
+iron_march_nodes_after <-
+sqldf("SELECT*
+FROM iron_march_nodes 
+WHERE  ([start_half] = '2015.1' 
+OR [start_half]  = '2015.2'
+OR [start_half]  = '2016.1'
+OR [start_half]  = '2016.2'
+OR [start_half]  = '2017.1'
+OR [start_half]  = '2017.2')
+")
+
+#------ Splitting Edge List -------
+
+iron_march_edges_before <-
+sqldf("SELECT*
+FROM iron_march_edges_ids_prep 
+WHERE  ([time half] = '2014.1'
+OR [time half] = '2014.2'
+OR [time half] = '2013.1'
+OR [time half] = '2013.2'
+OR [time half] = '2012.1'
+OR [time half] = '2012.2'
+OR [time half] = '2011.2')
+")
+
+iron_march_edges_after <-
+sqldf("SELECT*
+FROM iron_march_edges_ids_prep 
+WHERE  ([time half] = '2015.1' 
+OR [time half] = '2015.2'
+OR [time half] = '2016.1'
+OR [time half] = '2016.2'
+OR [time half] = '2017.1'
+OR [time half] = '2017.2')
+")
+
+library(igraph)
+iron_march_network_before <- graph_from_data_frame(d=iron_march_edges_before, vertices=iron_march_nodes, directed=T) 
+iron_march_network_after <- graph_from_data_frame(d=iron_march_edges_after, vertices=iron_march_nodes, directed=T) 
+
+library(CINNA)
+pr_cent_before<-proper_centralities(iron_march_network_before)
+
+pr_cent_after<-proper_centralities(iron_march_network_after)
+
+# [1] "Alpha Centrality"                                 "Burt's Constraint"                               
+# [3] "Page Rank"                                        "Average Distance"                                
+# [5] "Barycenter Centrality"                            "BottleNeck Centrality"                           
+# [7] "Centroid value"                                   "Closeness Centrality (Freeman)"                  
+# [9] "ClusterRank"                                      "Decay Centrality" 
+# alpha = https://igraph.org/r/doc/alpha_centrality.html
+
+```
+
+# Network Stats - Before
+https://www.rdocumentation.org/packages/igraph/versions/0.7.1/topics/centralization
+https://igraph.org/r/doc/constraint.html
+
+```{r}
+before_nodes <- V(iron_march_network_before)
+before_edges <- E(iron_march_network_before) # 78972
+before_degree <- degree(iron_march_network_before) 
+before_closeness <- closeness(iron_march_network_before) 
+before_betweenness <- betweenness(iron_march_network_before) 
+before_alpha<- alpha_centrality(iron_march_network_before, alpha=0.9) 
+before_constraint <- constraint(iron_march_network_before)
+before_trans <- transitivity(iron_march_network_before)
+before_indegree <- degree(iron_march_network_before, mode = "in")
+before_outdegree <- degree(iron_march_network_before, mode = "out")
+
+#V(iron_march_network_before)$degree <- degree(iron_march_network_before) # Degree centrality 
+#V(iron_march_network_before)$hubs <- hub.score(iron_march_network_before)$vector                # "Hub" centrality
+#V(iron_march_network_before)$authorities <- authority.score(iron_march_network_before)$vector   # "Authority" centrality
+#V(iron_march_network_before)$closeness <- closeness(iron_march_network_before)                  # Closeness centrality
+#V(iron_march_network_before)$betweenness <- betweenness(iron_march_network_before) 
+
+iron_march_network_before_density <- edge_density(iron_march_network_before, loops=F) # 0.001433875
+iron_march_network_before_cent <- centralization.degree(iron_march_network_before, mode = "all") # 0.3406676
+iron_march_network_before_btw <- centralization.betweenness(iron_march_network_before, directed = TRUE) # 0.002034856
+iron_march_network_before_diam <- diameter(iron_march_network_before, directed=T) # 21
+iron_march_network_before_dist <- mean_distance(iron_march_network_before) # 2.75189
+iron_march_network_before_indegree <- centralization.degree(iron_march_network_before, mode = "in") # 0.6826773
+iron_march_network_before_outdegree <- centralization.degree(iron_march_network_before, mode = "out") #0.42681
+
+# Modularity  https://dshizuka.github.io/networkanalysis/05_community.html, https://users.dimi.uniud.it/~massimo.franceschet/R/communities.html
+
+wtc <- cluster_walktrap(iron_march_network_before)
+modularity(wtc)
+iron_march_network_before_mod <- modularity(iron_march_network_before, membership(wtc)) # 0.1106328
+
+```
+
+# Network Stats - After
+https://www.rdocumentation.org/packages/igraph/versions/0.7.1/topics/centralization
+
+```{r}
+
+after_nodes <- V(iron_march_network_after) # 7415
+after_edges <- E(iron_march_network_after) # 108168
+after_degree <- degree(iron_march_network_after) 
+after_closeness <- closeness(iron_march_network_after) 
+after_betweenness <- betweenness(iron_march_network_after)
+after_alpha<- alpha_centrality(iron_march_network_after, alpha=0.9) 
+after_constraint <- constraint(iron_march_network_after)
+after_trans <- transitivity(iron_march_network_after)
+after_indegree <- degree(iron_march_network_after, mode = "in")
+after_outdegree <- degree(iron_march_network_after, mode = "out")
+
+#V(iron_march_network_after)$degree <- degree(iron_march_network_after)  
+#V(iron_march_network_after)$hubs <- hub.score(iron_march_network_after)$vector                # "Hub" centrality
+#V(iron_march_network_after)$authorities <- authority.score(iron_march_network_after)$vector   # "Authority" centrality
+#V(iron_march_network_after)$closeness <- closeness(iron_march_network_after)                  # Closeness centrality
+#V(iron_march_network_after)$betweenness <- betweenness(iron_march_network_after) 
+
+iron_march_network_after_density <- edge_density(iron_march_network_after, loops=F) # 0.001957587
+iron_march_network_after_cent <- centralization.degree(iron_march_network_after, mode = "all") # 0.4156194
+iron_march_network_after_btw <- centralization.betweenness(iron_march_network_after, directed = TRUE) # 0.01083763
+iron_march_network_after_diam <- diameter(iron_march_network_after, directed=T) # 24
+iron_march_network_after_dist <- mean_distance(iron_march_network_after) # 3.326355
+iron_march_network_after_indegree <- centralization.degree(iron_march_network_after, mode = "in") #0.8330842
+iron_march_network_after_outdegree <- centralization.degree(iron_march_network_after, mode = "out") #0.6559868
+
+# Modularity  https://dshizuka.github.io/networkanalysis/05_community.html, https://users.dimi.uniud.it/~massimo.franceschet/R/communities.html
+
+wtc <- cluster_walktrap(iron_march_network_after)
+modularity(wtc)
+iron_march_network_after_mod <- modularity(iron_march_network_after, membership(wtc)) # 0.2665975
+
+
+```
+
+# T TESTS
+
+Not normally distributed so we use the Wilcox Test. If the p-value of the test is < 0.05, which is less than the significance level alpha = 0.05, we can conclude that the metric of the network before is significantly different from the metric after treatment with a p-value.
+
+burt - https://ruqinren.wordpress.com/2018/03/01/hand-calculation-of-burts-constraint-in-networks/
+
+```{r}
+#Degree Test
+degree_dif<-after_degree-before_degree
+
+mean(before_degree) # 21.2615
+sd(before_degree) # 136.2742
+
+mean(after_degree) # 29.02711
+sd(after_degree) # 174.2632
+
+mean(degree_dif) # 7.76561
+sd(degree_dif) # 
+
+hist(degree_dif,main='Histogram for Difference in Degrees',xlab='Differences', breaks = 50) # normal?
+qqnorm(degree_dif)
+qqline(degree_dif)
+
+# Kolmogorov-Smirnov Test
+# D = 0.48092, p-value < 2.2e-16 (< .05 = non-normal)
+ks.test(degree_dif, 'pnorm') 
+
+# V = 9850659, p-value < 2.2e-16 (p < 0.001) 
+degree_test <- wilcox.test(before_degree, after_degree, paired = TRUE)
+degree_test
+
+degree_zstat<-qnorm(degree_test$p.value/2) # https://www.simplypsychology.org/z-score.html
+degree_zstat #-5.384035
+
+# Cohen’sclassification of effect sizes which is 0.1 (small effect), 0.3 (moderate effect) and 0.5 and
+# above (large effect).
+
+
+# t = -4.1602, df = 7414, p-value = 3.215e-05 / mean diff = 7.874848 (nodes increased their degrees by 7.8)
+#t.test(before_degree,after_degree, paired = TRUE)
+
+```
+
+```{r}
+#InDegree Test
+indegree_dif<-after_indegree-before_indegree
+mean(indegree_dif) #3.882805
+sd(indegree_dif) #66.5591
+
+mean(before_indegree) #10.63075
+sd(before_indegree) #78.37278
+
+mean(after_indegree) #14.51355
+sd(after_indegree) #113.5992
+
+hist(indegree_dif,main='Histogram for Difference in Degrees',xlab='Differences', breaks = 50) # normal?
+qqnorm(indegree_dif)
+qqline(indegree_dif)
+
+# Kolmogorov-Smirnov Test
+# D = 0.40512, p-value < 2.2e-16 (< .05 = non-normal)
+ks.test(indegree_dif, 'pnorm') 
+
+indegree_test <- wilcox.test(before_indegree, after_indegree, paired = TRUE)
+indegree_test
+# V = 9051579, p-value = 6.645e-09
+
+#OutDegree Test
+outdegree_dif<-after_outdegree-before_outdegree
+mean(outdegree_dif) #3.882805
+sd(outdegree_dif) #136.9174
+
+mean(before_outdegree) #10.63075
+sd(before_outdegree) #107.1539
+
+mean(after_outdegree) #14.51355
+sd(after_outdegree) #121.52
+
+hist(outdegree_dif,main='Histogram for Difference in Degrees',xlab='Differences', breaks = 20) # normal?
+qqnorm(outdegree_dif)
+qqline(outdegree_dif)
+
+# Kolmogorov-Smirnov Test
+# D = 0.46736, p-value < 2.2e-16 (< .05 = non-normal)
+ks.test(outdegree_dif, 'pnorm') 
+
+outdegree_test <- wilcox.test(before_outdegree, after_outdegree, paired = TRUE)
+outdegree_test
+# V = 188192, p-value < 2.2e-16
+
+```
+
+```{r}
+#Betweenness Test
+
+between_dif<-after_betweenness-before_betweenness
+mean(between_dif) # 513.2659
+sd(between_dif) # 8787.12
+
+mean(before_betweenness) # 145.2394
+sd(before_betweenness) # 2258.106
+
+mean(after_betweenness) # 658.5053
+sd(after_betweenness) # 9581.301
+
+hist(between_dif,main='Histogram for Difference in Betweenness',xlab='Differences') # normal?
+qqnorm(between_dif)
+qqline(between_dif)
+
+# Kolmogorov-Smirnov Test
+# D = 0.47748, p-value < 2.2e-16 (< .05 = non-normal)
+ks.test(between_dif, 'pnorm') 
+
+# V = 52609, p-value < 2.2e-16
+betweenness_test <- wilcox.test(before_betweenness, after_betweenness, paired = TRUE)
+betweenness_test
+
+betweenness_zstat<-qnorm(betweenness_test$p.value/2) # https://www.simplypsychology.org/z-score.html
+betweenness_zstat #-7.62565
+
+```
+
+```{r}
+#Closeness Test
+
+#closeness_dif<-after_closeness-before_closeness
+#mean(closeness_dif) # 7.255017e-10
+#sd(closeness_dif)
+
+#hist(closeness_dif,main='Histogram for Difference in Closness',xlab='Differences') # normal?
+#qqnorm(closeness_dif)
+#qqline(closeness_dif)
+
+# Kolmogorov-Smirnov Test
+# D = 0.5, p-value < 2.2e-16 (< .05 = non-normal)
+#ks.test(closeness_dif, 'pnorm') 
+
+# V = 127709, p-value < 2.2e-16
+#closeness_test <- wilcox.test(before_closeness, after_closeness, paired = TRUE)
+#closeness_test
+```
+
+```{r}
+#Alpha Test -  measure of influence of a node in a network
+
+alpha_dif<-after_alpha-before_alpha
+mean(alpha_dif) # 7.255017e-10
+sd(alpha_dif)
+
+mean(before_alpha) # 2.859759
+sd(before_alpha)# 222.8735
+
+mean(after_alpha) # -14.09315
+sd(after_alpha)# 381.6944
+
+# Kolmogorov-Smirnov Test
+# D = 0.36087, p-value < 2.2e-16(< .05 = non-normal)
+ks.test(alpha_dif, 'pnorm') 
+
+#  = 10351002, p-value = 0.8986 (Not stat sig)
+alpha_test <- wilcox.test(before_alpha, after_alpha, paired = TRUE)
+alpha_test
+```
+
+```{r}
+##Clustering Coefficeint 
+trans_dif<-after_trans-before_trans
+mean(trans_dif) # -0.005280087
+sd(trans_dif) #NA
+
+mean(before_trans) # 0.02180291
+sd(before_trans) #NA
+
+# Kolmogorov-Smirnov Test
+# D = 0.50211, p-value = 0.9958 (< .05 = non-normal)
+ks.test(trans_dif, 'pnorm') 
+
+hist(trans_dif,main='Histogram for Difference in Closness',xlab='Differences') # normal?
+qqnorm(trans_dif)
+qqline(trans_dif)
+
+# transitive influence of nodes
+# V = 9546706, p-value = 0.0002274
+trans_test <- wilcox.test(before_alpha, after_alpha, paired = TRUE)
+trans_test
+```
+
+```{r}
+#Constraint Test
+constraint_dif<-after_constraint-before_constraint
+
+mean(constraint_dif) 
+sd(constraint_dif)
+
+# Kolmogorov-Smirnov Test
+# D = 0.39001, p-value < 2.2e-16 (< .05 = non-normal)
+ks.test(constraint_dif, 'pnorm') 
+
+# how much the ego’s friends are also connected among themselves - structural hole 
+# V = 38974, p-value < 2.2e-16
+constraint_test <- wilcox.test(before_constraint, after_constraint, paired = TRUE)
+constraint_test
+```
+
+```{r}
+#Mod
+mod_dif<-iron_march_network_after_mod-iron_march_network_before_mod
+
+mean(iron_march_network_before_mod) # 0.1203694
+sd(iron_march_network_before_mod) # 0
+
+mean(iron_march_network_after_mod) # 21.30061
+sd(iron_march_network_after_mod) # 136.4196
+
+mean(mod_dif) # 7.874848
+sd(mod_dif) # 162.997
+
+hist(mod_dif,main='Histogram for Difference in Mod',xlab='Differences', breaks = 50) # normal?
+qqnorm(mod_dif)
+qqline(mod_dif)
+
+# Kolmogorov-Smirnov Test
+# D = 0.57795, p-value = 0.8441 (< .05 = non-normal)
+ks.test(mod_dif, 'pnorm') 
+
+# V = 0, p-value = 1 (p < 0.001) 
+mod_test <- wilcox.test(iron_march_network_before_mod, iron_march_network_after_mod, paired = TRUE)
+mod_test
+
+
+```
+
+# INSIGHT DEEP DIVE INTO STRUCTURAL AND NETWORK STATS 
+
+1) Increase in messages and posts in 2015.1 prior to the boost in membership in 2016.1. 
+
+Can't say more members caused more contact. 
+
+What does 2015 looks like in terms of content?
+```{r}
+
+# ALL NUMBERS ARE INCORRECT - RUN CODE FOR UPDATED NUMBERS BEFORE REPORTING ON THIS
+colnames(iron_march_private_messages)
+
+# Remove NAs
+iron_march_private_messages_nas <- na.omit(iron_march_private_messages)
+
+# Howe many messages were sent in 2015? 3,207 in total for 2015
+# 2016.1	2144
+# 2015.2	1384			
+# 2015.1	1823
+# 2014.2	622			
+# 2014.1	622	
+	
+sqldf("SELECT msg_date_half,
+COUNT(msg_thread_id) as message_count
+FROM iron_march_private_messages_nas 
+WHERE  ([msg_date_half] = '2015.1' OR 
+[msg_date_half] = '2015.2')
+GROUP BY msg_date_half
+ORDER BY msg_date DESC")
+
+# Top messagers in 2015
+
+im_messages_2015_top <-
+sqldf("SELECT msg_sender_name, COUNT(msg_sender_name) as freq_messages
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2015.1' OR 
+[msg_date_half] = '2015.2')
+GROUP BY msg_sender_name
+HAVING [freq_messages] > 75
+ORDER BY freq_messages DESC")
+
+# Plot top messagers in 2015
+
+im_messages_2015_top %>% 
+  mutate(msg_sender_name = fct_reorder(msg_sender_name, freq_messages)) %>%
+  ggplot( aes(x=msg_sender_name, y=freq_messages)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    coord_flip() +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Top 10 Nodes Who Messaged The Most in 2015", subtitle = "When Messages >75") +
+  xlab("Member Name") + ylab("Frequency of Messages")  +
+geom_label(
+    aes(label=freq_messages), 
+    nudge_x = 0, nudge_y = 15, 
+    check_overlap = T,
+    size = 3)
+
+# Who has the lion's share in terms of overall % of messages in 2015?
+im_messages_2015_all <-
+sqldf("SELECT msg_sender_name, msg_receiver_name, COUNT(msg_thread_id) as freq_messages, msg_date_half
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2015.1'
+OR [msg_date_half] = '2015.2')
+GROUP BY msg_sender_name, msg_receiver_name, msg_date_half
+ORDER BY freq_messages DESC")
+im_messages_2015_all 
+
+library(formattable)
+library(dplyr)
+
+im_messages_2015_all %>%
+  mutate(Freq = formattable::percent(freq_messages/sum(freq_messages)))
+
+median(im_messages_2015_all$freq_messages)
+mean(im_messages_2015_all$freq_messages)
+
+
+# Sender Receiver Count %
+# Bear is tied to 630 messages exchanges; 12.25% or 393 between Bear and kllш and 7.39% or 237 between Bear and Neizbezhnost
+# 19.64% of all the messages in 2015.1 are from two threads involving Bear
+# 2 is the median number of messages exchanged  vs 4.38 mean
+
+# kllш	Bear	222	6.92%	
+# Bear	kllш	171	5.33%	
+# Neizbezhnost	Bear	129	4.02%	
+# Bear	Neizbezhnost	108	3.37%	
+
+```
+# kllш and Bear private messages in 2015.2
+
+```{r}
+# Take a look at these two members' messages to other members
+# 747 messages sent from both members
+im_messages_2015_exchange <-
+sqldf("SELECT*
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2015.1'
+OR [msg_date_half] = '2015.2')
+AND ([msg_sender_name] = 'kllш' OR 
+[msg_sender_name] = 'Bear')
+ORDER BY msg_date DESC")
+
+# Lots of exchange between Bear and kllш - 393 messages between the two members
+# 52.51% of their messages were actually between each other
+# msg_post_id 12286 indicates Bear is a women according to kllш. The thread is initiated by kllш. asking Bear for her Skype details.
+#HAIL YOUR GREATNESS, BEAR GODDESS. I SHALL TAKE YOUR BLESSING ON MY GREAT AND PERILOUS JOURNEY. Oh that's cool. I hate skype anyway, it always freezes for me. I want to say I agree with #everything your nice anon is saying, but I'm not afraid to say it off anon <img src="<fileStore.core_Emoticons>/emoticons/GeneralIMemoticons_wub.png" alt=":wub:" />You're the perfect woman #that I could imagine. I know I'm a 17 yr old pleb but I might as well be the one to say it.	
+
+sqldf("SELECT msg_thread_title, msg_text, msg_date, msg_sender_name, msg_post_id
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2015.1'
+OR [msg_date_half] = '2015.2')
+AND ([msg_sender_name] = 'kllш' AND 
+[msg_receiver_name] = 'Bear' OR 
+[msg_sender_name] = 'Bear' AND 
+[msg_receiver_name] = 'kllш' )
+ORDER BY msg_date")
+
+# Two threads:
+# Grats&#33; had just 1 message
+# whats ur skype has 392 messages between the two members
+
+sqldf("SELECT DISTINCT msg_thread_title, COUNT(msg_thread_id)
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2015.1'
+OR [msg_date_half] = '2015.2')
+AND ([msg_sender_name] = 'kllш' AND 
+[msg_receiver_name] = 'Bear' OR 
+[msg_sender_name] = 'Bear' AND 
+[msg_receiver_name] = 'kllш' )
+GROUP BY msg_thread_title")
+
+# Other threads these members start
+sqldf("SELECT*
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2015.1'
+OR [msg_date_half] = '2015.2')
+AND ([msg_sender_name] = 'kllш' AND 
+[msg_receiver_name] != 'Bear' OR 
+[msg_sender_name] = 'Bear' AND 
+[msg_receiver_name] != 'kllш' )
+GROUP BY msg_thread_title")
+
+# When did the Bear and Kllw join?
+# Bear	2014-01-28 15:28:16	2017-01-13 02:58:48	Iron March Member	
+# kllш	2014-06-14 07:52:04	2017-02-22 20:48:06	Iron March Member
+# New members in 2014
+
+sqldf("SELECT member_name, member_joined, member_last_activity_date, member_role
+FROM iron_march_members 
+WHERE ([member_name] = 'kllш' OR 
+[member_name] = 'Bear')")
+
+# Check what the messages look like without the romantic relationship
+im_messages_2015_excluding_romance <-
+sqldf("SELECT msg_sender_name, msg_receiver_name, msg_date_half, COUNT(msg_thread_id) as freq_messages
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2015.1' OR 
+[msg_date_half] = '2015.2')
+AND NOT ([msg_sender_name] = 'kllш' AND 
+[msg_receiver_name] = 'Bear' OR 
+[msg_sender_name] = 'Bear' AND 
+[msg_receiver_name] = 'kllш')
+GROUP BY msg_sender_name, msg_receiver_name, msg_date_half
+ORDER BY freq_messages DESC")
+im_messages_2015_excluding_romance 
+
+# All below 5% share of messages with the exchange between Bear and Kllw
+# 3257 messages
+im_messages_2015_excluding_romance %>%
+  mutate(Freq = formattable::percent(freq_messages/sum(freq_messages)))
+```
+# Neizbezhnost and Bear private messages in 2015.1
+
+```{r}
+
+# Neizbezhnost	Bear	129	2015.1	4.02%
+# Bear	Neizbezhnost	108	2015.1	3.37%
+
+# Take a look at these two members' messages to other members
+# 509 messages sent from both members
+im_messages_2015_neiz_bear <-
+sqldf("SELECT*
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2015.1'
+OR [msg_date_half] = '2015.2')
+AND ([msg_sender_name] = 'Neizbezhnost' OR 
+[msg_sender_name] = 'Bear')
+ORDER BY msg_date DESC")
+im_messages_2015_neiz_bear 
+
+# what's the interaction look like?
+sqldf("SELECT msg_thread_title, msg_text, msg_date, msg_sender_name, msg_post_id
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2015.1'
+OR [msg_date_half] = '2015.2')
+AND ([msg_sender_name] = 'Neizbezhnost' AND 
+[msg_receiver_name] = 'Bear' OR 
+[msg_sender_name] = 'Bear' AND 
+[msg_receiver_name] = 'Neizbezhnost' )
+ORDER BY msg_date")
+
+# threads:
+# Privjet Bear. 237 messages
+sqldf("SELECT DISTINCT msg_thread_title, COUNT(msg_thread_id)
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2015.1'
+OR [msg_date_half] = '2015.2')
+AND ([msg_sender_name] = 'Neizbezhnost' AND 
+[msg_receiver_name] = 'Bear' OR 
+[msg_sender_name] = 'Bear' AND 
+[msg_receiver_name] = 'Neizbezhnost' )
+GROUP BY msg_thread_title")
+
+sqldf("SELECT*
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2015.1'
+OR [msg_date_half] = '2015.2')
+AND ([msg_sender_name] = 'Neizbezhnost' AND 
+[msg_receiver_name] != 'Bear' OR 
+[msg_sender_name] = 'Bear' AND 
+[msg_receiver_name] != 'Neizbezhnost' )
+GROUP BY msg_thread_title")
+
+
+# When did the Bear and Neizbezhnost join?
+# Bear	2014-01-28 15:28:16	2017-01-13 02:58:48	Iron March Member	
+# Neizbezhnost	2015-01-27 18:59:02	2016-10-19 07:05:41	Iron March Member
+# New members in 2014
+
+sqldf("SELECT member_name, member_joined, member_last_activity_date, member_role
+FROM iron_march_members 
+WHERE ([member_name] = 'Neizbezhnost' OR 
+[member_name] = 'Bear')")
+
+# Check what the messages look like without the romantic relationship
+im_messages_2015_excluding_romance2 <-
+sqldf("SELECT msg_sender_name, msg_receiver_name, msg_date_half, COUNT(msg_thread_id) as freq_messages
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2015.1' OR 
+[msg_date_half] = '2015.2')
+AND NOT ([msg_sender_name] = 'kllш' AND 
+[msg_receiver_name] = 'Bear' OR 
+[msg_sender_name] = 'Bear' AND 
+[msg_receiver_name] = 'kllш' OR
+[msg_sender_name] = 'Neizbezhnost' OR 
+[msg_receiver_name] = 'Bear' OR 
+[msg_sender_name] = 'Bear' AND 
+[msg_receiver_name] = 'Neizbezhnost')
+GROUP BY msg_sender_name, msg_receiver_name, msg_date_half
+ORDER BY freq_messages DESC")
+im_messages_2015_excluding_romance2 
+
+# All below 5% share of messages with the exchange between Bear and Kllw
+# 3257 messages
+im_messages_2015_excluding_romance2 %>%
+  mutate(Freq = formattable::percent(freq_messages/sum(freq_messages)))
+
+ 
+```
+# 2015 - Other top messagers 
+```{r}
+
+# Who are they?
+
+# 150	Insurrectionist	2012-02-11 19:36:23	2012.1	National Action Recruiter
+# 1558	Spöket	2012-11-03 11:59:55	2012.2	Iron March Member
+# 2306	Sammy	2012-12-27 23:12:14	2012.2	National Action Recruiter
+# 4873	Rintrah	2013-03-26 18:41:00	2013.1	Iron March Member
+# 7481	RadioFreeGB	2014-02-16 21:58:28	2014.1	Iron March Member
+# 7600	Odin	2014-03-21 19:20:12	2014.1	AWD Member
+# 9174	Atlas	2015-02-05 16:09:01	2015.1	National Action Member
+# 9503	HermannTheGerman	2015-05-29 02:18:44	2015.1	Iron March Member
+# 9571	Moorish Fascist	2015-07-28 21:28:09	2015.2	Iron March Member
+# 9679	Vinokura	2015-09-29 23:27:24	2015.2	Iron March Member#
+
+sqldf("SELECT member_id, member_name, member_joined, member_joined_half, member_role
+FROM iron_march_members 
+WHERE ([member_name] = 'Moorish Fascist	'
+OR [member_name] = 'Vinokura'
+OR [member_name] = 'Rintrah'
+OR [member_name] = 'RadioFreeGB'
+OR [member_name] = 'Sammy'
+OR [member_name] = 'HermannTheGerman'
+OR [member_name] = 'Atlas'
+OR [member_name] = 'Insurrectionist'
+OR [member_name] = 'Spöket'
+OR [member_name] = 'Boots On the Ground	'
+OR [member_name] = 'Odin'
+OR [member_name] = 'Moorish Fascist'
+OR [member_name] = 'Aquila')
+")
+
+# Vinokura + Moorish Fascist thread - 113 messages in "hey sup bro" in 2015.2 and 13 more in 2016.1
+sqldf("SELECT msg_thread_title, msg_text, msg_date, msg_sender_name, msg_post_id
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2015.1'
+OR [msg_date_half] = '2015.2'
+OR [msg_date_half] = '2016.1')
+AND ([msg_sender_name] = 'Moorish Fascist' AND 
+[msg_receiver_name] = 'Vinokura' OR 
+[msg_sender_name] = 'Vinokura' AND 
+[msg_receiver_name] = 'Moorish Fascist' )
+ORDER BY msg_date")
+
+# Sammy +  kllш thread - 61 messages in "oi" in 2015.1
+sqldf("SELECT msg_thread_title, msg_text, msg_date, msg_sender_name, msg_post_id
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2015.1'
+OR [msg_date_half] = '2015.2'
+OR [msg_date_half] = '2016.1')
+AND ([msg_sender_name] = 'Sammy' AND 
+[msg_receiver_name] = 'kllш' OR 
+[msg_sender_name] = 'kllш' AND 
+[msg_receiver_name] = 'Sammy' )
+ORDER BY msg_date")
+
+# HermannTheGerman and kllш - 73 messages in "zogbook"
+sqldf("SELECT msg_thread_title, msg_text, msg_date, msg_sender_name, msg_post_id
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2015.1'
+OR [msg_date_half] = '2015.2'
+OR [msg_date_half] = '2016.1')
+AND ([msg_sender_name] = 'kllш' AND 
+[msg_receiver_name] = 'HermannTheGerman' OR 
+[msg_sender_name] = 'HermannTheGerman' AND 
+[msg_receiver_name] = 'kllш' )
+ORDER BY msg_date")
+
+# Insurrectionist threads - 97 messages 
+
+insurrectionist_messages <- 
+sqldf("SELECT msg_thread_title, msg_text, msg_date, msg_sender_name, msg_receiver_name, msg_post_id
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2015.1'
+OR [msg_date_half] = '2015.2'
+OR [msg_date_half] = '2016.1')
+AND ([msg_sender_name] = 'Insurrectionist' 
+OR [msg_receiver_name] = 'Insurrectionist')
+ORDER BY msg_date")
+
+write.csv(insurrectionist_messages,"insurrectionist_messages.csv", row.names = FALSE)
+```
+
+
+# Posts
+
+1) Increase in posts in 2015.1 prior to the boost in membership in 2016.1. 
+
+```{r}
+
+colnames(iron_march_comments_posts)
+
+# Remove NAs
+iron_march_comments_posts_nas <- na.omit(iron_march_comments_posts)
+
+# Howe many posts were created in 2015? 
+# 2015.2	16376			
+# 2015.1	14332	
+	
+sqldf("SELECT post_date_half,
+COUNT(post_id) as post_count
+FROM iron_march_comments_posts_nas 
+WHERE  [post_class] LIKE '%Post%' 
+AND ([post_date_half] = '2015.1' OR
+[post_date_half] = '2015.2')
+GROUP BY post_date_half
+ORDER BY post_date_created DESC")
+
+
+# Most Popular Posts in 2015.1
+top_posts_2015.1 <- sqldf("SELECT DISTINCT post_title,
+COUNT(post_id) as post_count
+FROM iron_march_comments_posts_nas 
+WHERE  [post_class] LIKE '%Post%' 
+AND [post_date_half] = '2015.1' 
+GROUP BY post_title
+HAVING post_count > 150
+ORDER BY post_count DESC")
+
+# Plot top messagers in 2015
+
+top_posts_2015.1 %>% 
+  mutate(post_title = fct_reorder(post_title, post_count)) %>%
+  ggplot( aes(x=post_title, y=post_count)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    coord_flip() +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Top 10 Posts With Most Comments in 2015.1", subtitle = "When Comments >150") +
+  xlab("Post Title") + ylab("Frequency of Comments")  +
+geom_label(
+    aes(label=post_count), 
+    nudge_x = 0, nudge_y = 15, 
+    check_overlap = T,
+    size = 3)
+
+# Who has the lion's share in terms of overall % of messages in 2015?
+
+sqldf("SELECT DISTINCT post_title, post_author_name, COUNT(post_id) as post_count, post_date_half
+FROM iron_march_comments_posts_nas 
+WHERE  [post_class] LIKE '%Post%' 
+AND ([post_date_half] = '2015.1' OR 
+[post_date_half] = '2014.2')
+GROUP BY post_title
+ORDER BY post_count DESC")
+
+# show increase in comments
+
+comments_increase_2015 <- 
+sqldf("SELECT DISTINCT post_title, COUNT(post_id) as post_count, post_date_half
+FROM iron_march_comments_posts_nas 
+WHERE  [post_class] LIKE '%Post%' 
+AND [post_date_half] = '2015.1' 
+GROUP BY post_title
+HAVING post_count >150
+ORDER BY post_count DESC")
+
+comments_increase_2014 <- 
+sqldf("SELECT DISTINCT post_title, COUNT(post_id) as post_count, post_date_half
+FROM iron_march_comments_posts_nas 
+WHERE  [post_class] LIKE '%Post%' 
+AND [post_date_half] = '2014.2'
+GROUP BY post_title
+HAVING post_count >100
+ORDER BY post_count DESC")
+
+comments_plot_2015 <- comments_increase_2015 %>% 
+  mutate(post_title = fct_reorder(post_title, post_count)) %>%
+  ggplot( aes(x=post_title, y=post_count)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    xlab("") +
+    theme_bw() + 
+geom_label(
+    aes(label=post_count), 
+    nudge_x = 0, nudge_y = 15, 
+    check_overlap = T,
+    size = 3) +
+    facet_wrap(~post_date_half, scale="fixed") +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x=element_blank())  
+
+comments_plot_2014 <- comments_increase_2014 %>% 
+  mutate(post_title = fct_reorder(post_title, post_count)) %>%
+  ggplot( aes(x=post_title, y=post_count)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    xlab("") +
+    theme_bw() + 
+geom_label(
+    aes(label=post_count), 
+    nudge_x = 0, nudge_y = 15, 
+    check_overlap = T,
+    size = 3) +
+    facet_wrap(~post_date_half, scale="fixed") +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+         axis.title.y = element_blank(),
+        axis.ticks.x=element_blank()) 
+
+require(gridExtra)
+grid.arrange(comments_plot_2014, comments_plot_2015, ncol=2, 
+             left="Frequency of Comments", 
+             bottom = "Number of Unique Posts",  
+             top = "Trend Upwards of Comments on Posts")
+
+```
+
+# Liberal_Degeneration & National Action Posts 
+```{r}
+colnames(iron_march_comments_posts_nas)
+# ------> General Data <----------
+
+Liberal_Degeneration <- 
+sqldf("SELECT post_author_name, post_title, post_date_half, post_date_created, post_comment_id, comment_text, comment_author_name
+FROM iron_march_comments_posts_nas 
+WHERE  [post_class] LIKE '%Post%' 
+AND [post_title] = 'Liberal Degeneration'
+GROUP BY post_author_name, post_title, post_date_half, post_date_created, post_comment_id, comment_text, comment_author_name
+ORDER BY post_date_created")
+
+members_uniq <- unique(Liberal_Degeneration$comment_author_name)
+length(members_uniq) # 324
+comments_uniq <- unique(Liberal_Degeneration$comment_text)
+length(comments_uniq) # 9455
+
+#write.csv(Liberal_Degeneration,"Liberal_Degeneration.csv", row.names = FALSE)
+
+# Plot activity 
+ld_count <- Liberal_Degeneration %>%
+  group_by(post_date_half) %>%
+  dplyr::summarise(n = n())
+
+ld_count$post_date_half <- as.factor(ld_count$post_date_half) # change to factor
+
+ld_count %>%  
+  ggplot( aes(x=post_date_half, y=n)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Activity on Liberal Degeneration Post") +
+  xlab("Year and Half") + ylab("Number of Comments") +
+geom_label(
+    aes(label=n), 
+    nudge_x = 0, nudge_y = 15, 
+    check_overlap = T,
+    size = 3) 
+
+# ------> 2015 Data <----------
+
+Liberal_Degeneration_2015 <- 
+sqldf("SELECT post_author_name, post_title, post_date_half, post_date_created, post_comment_id, comment_text, comment_author_name
+FROM iron_march_comments_posts_nas 
+WHERE  [post_class] LIKE '%Post%' 
+AND [post_date_half] = '2015.1'
+AND [post_title] = 'Liberal Degeneration'
+GROUP BY post_author_name, post_title, post_date_half, post_date_created, post_comment_id, comment_text, comment_author_name
+ORDER BY post_date_created")
+
+#write.csv(Liberal_Degeneration_2015,"Liberal_Degeneration_2015.csv", row.names = FALSE)
+
+# ------> General Data NA Post <----------
+
+National_Action <- 
+sqldf("SELECT post_author_name, post_title, post_date_half, post_date_created, post_comment_id, comment_text, comment_author_name
+FROM iron_march_comments_posts_nas 
+WHERE  [post_class] LIKE '%Post%' 
+AND [post_title] = 'National Action'
+GROUP BY post_author_name, post_title, post_date_half, post_date_created, post_comment_id, comment_text, comment_author_name
+ORDER BY post_date_created")
+
+na_members_uniq <- unique(National_Action$comment_author_name)
+length(na_members_uniq) # 100
+na_comments_uniq <- unique(National_Action$comment_text)
+length(na_comments_uniq) # 706
+
+#write.csv(National_Action,"National_Action.csv", row.names = FALSE)
+
+# Plot thread activity 
+national_a_count <- National_Action %>%
+  group_by(post_date_half) %>%
+  dplyr::summarise(n = n())
+
+national_a_count$post_date_half <- as.factor(national_a_count$post_date_half) # change to factor
+
+national_a_count %>%  
+  ggplot( aes(x=post_date_half, y=n)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Activity on National Action Post") +
+  xlab("Year and Half") + ylab("Number of Comments") +
+geom_label(
+    aes(label=n), 
+    nudge_x = 0, nudge_y = 15, 
+    check_overlap = T,
+    size = 3) 
+```
+
+```{r}
+
+library(quanteda)
+
+toks_msg <- tokens(im_messages_2015_exchange$msg_text, remove_punct = TRUE)
+dfmat_msg <- dfm(toks_msg)
+
+dfmat_msg_nostop <- dfm_select(dfmat_msg, pattern = c(stopwords("en"), "<", ">", "=", "div", "emoticons", "like", "just", "src", "can", "height", "width","good", "know", "20", "filestore.core_emoticons", "one", "img", "alt", "blockquote", "time", "also", "get", "think", "really", "people", "2x", "now","also", "hi", "much", "rel","want", "even", "class", "external", "png", "well", "br"), selection = "remove")
+topfeatures(dfmat_msg_nostop, 100)
+
+```
+
+# RQ1: WHAT HAPPENED IN 2016 TO INCREASE SPIKE IN ACTIVITY?
+
+```{r}
+
+# ALL NUMBERS ARE INCORRECT - RUN CODE FOR UPDATED NUMBERS BEFORE REPORTING ON THIS
+colnames(iron_march_private_messages)
+
+# Remove NAs
+iron_march_private_messages_nas <- na.omit(iron_march_private_messages)
+
+# How many messages were sent in 2016? 4500 in total for 2016
+# Sender = Receiver
+# 2016.2	2272			
+# 2016.1	1959	
+# 2015.2	1384			
+# 2015.1	1823
+# 2014.2	622			
+# 2014.1	622	
+	
+sqldf("SELECT msg_date_half,
+COUNT(msg_thread_id) as message_count
+FROM iron_march_private_messages_nas 
+WHERE  ([msg_date_half] = '2016.1' OR 
+[msg_date_half] = '2016.2')
+GROUP BY msg_date_half
+ORDER BY msg_date DESC")
+
+im_messages_2016 <- 
+sqldf("SELECT msg_sender_name, COUNT(msg_sender_name) as freq_messages
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2016.1' OR 
+[msg_date_half] = '2016.2')
+GROUP BY msg_sender_name
+ORDER BY freq_messages DESC")
+
+median(im_messages_2016$freq_messages) # 7
+range(im_messages_2016$freq_messages) # 1 - 281
+
+# Top messagers in 2016
+# 121 members above median of 7 messages sent in 2016
+
+im_messages_2016_top <-
+sqldf("SELECT msg_sender_name, COUNT(msg_sender_name) as freq_messages
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2016.1' OR 
+[msg_date_half] = '2016.2')
+GROUP BY msg_sender_name
+ORDER BY freq_messages DESC
+LIMIT 10
+")
+
+# Plot top messagers in 2016
+
+im_messages_2016_top %>% 
+  mutate(msg_sender_name = fct_reorder(msg_sender_name, freq_messages)) %>%
+  ggplot( aes(x=msg_sender_name, y=freq_messages)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    coord_flip() +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Top 10 Nodes Who Messaged The Most in 2016") +
+  xlab("Member Name") + ylab("Frequency of Messages")  +
+geom_label(
+    aes(label=freq_messages), 
+    nudge_x = 0, nudge_y = 15, 
+    check_overlap = T,
+    size = 3)
+```
+
+
+```{r}
+# Who has the lion's share in terms of overall % of messages in 2016?
+im_messages_2016_all <-
+sqldf("SELECT msg_sender_name, msg_receiver_name, COUNT(msg_thread_id) as freq_messages, msg_date_half
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2016.1'
+OR [msg_date_half] = '2016.2')
+GROUP BY msg_sender_name, msg_receiver_name, msg_date_half
+ORDER BY freq_messages DESC
+")
+
+library(formattable)
+library(dplyr)
+im_messages_2016_all  %>%
+  mutate(Freq = formattable::percent(freq_messages/sum(freq_messages)))
+
+d2016 <- density(im_messages_2016_all$freq_messages)
+plot(d2016, main="Distribution of Messages in 2016")
+polygon(d2016, col="red", border="blue")
+
+median(im_messages_2016_all$freq_messages) # 2
+mean(im_messages_2016_all$freq_messages) #4.366357
+
+```
+# Moorish Fascist and Kay Kay Kay private messages in 2016
+
+```{r}
+# Take a look at these two members' messages to other members
+im_messages_2016_exchange <-
+sqldf("SELECT*
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2016.1'
+OR [msg_date_half] = '2016.2')
+AND ([msg_sender_name] = 'Moorish Fascist' AND 
+[msg_receiver_name] = 'Kay Kay Kay' OR 
+[msg_sender_name] = 'Kay Kay Kay' AND 
+[msg_receiver_name] = 'Moorish Fascist')
+ORDER BY msg_date")
+
+sqldf("SELECT COUNT(msg_text) as mention
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2016.1'
+OR [msg_date_half] = '2016.2')
+AND ([msg_sender_name] = 'Moorish Fascist' AND 
+[msg_receiver_name] = 'Kay Kay Kay' OR 
+[msg_sender_name] = 'Kay Kay Kay' AND 
+[msg_receiver_name] = 'Moorish Fascist')
+AND ([msg_text] lIKE '%Slavros%' 
+OR  [msg_text] lIKE '%slavros%')
+ORDER BY msg_date")
+
+# Lots of exchange between Kay Kay Kay and Moorish Fascist	 - 383 messages between the two members
+# 44.63% of messages between the two members in one thread "Seriously Tho Bro Yo You know Oh No Lets Go"
+
+sqldf("SELECT msg_thread_title, msg_text, msg_date, msg_sender_name, msg_post_id
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2016.1'
+OR [msg_date_half] = '2016.2')
+AND ([msg_sender_name] = 'Moorish Fascist' AND 
+[msg_receiver_name] = 'Kay Kay Kay' OR 
+[msg_sender_name] = 'Kay Kay Kay' AND 
+[msg_receiver_name] = 'Moorish Fascist' )
+ORDER BY msg_date")
+
+# Other threads these members start - 1 by KKK, 14 by Moorish Fascist
+sqldf("SELECT*
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2016.1'
+OR [msg_date_half] = '2016.2')
+AND ([msg_sender_name] = 'Moorish Fascist' AND 
+[msg_receiver_name] != 'Kay Kay Kay' OR 
+[msg_sender_name] = 'Kay Kay Kay' AND 
+[msg_receiver_name] != 'Moorish Fascist' )
+GROUP BY msg_thread_title")
+
+# Moorish Fascist	2015-07-28 21:28:09	2017-08-25 07:17:28	Iron March Member	
+# Kay Kay Kay	2016-03-04 01:22:13	2017-10-15 02:27:12	Iron March Moderator
+# New members in 2015.2 and 2016.1 (KKK is a mod)
+
+sqldf("SELECT member_name, member_joined, member_last_activity_date, member_role
+FROM iron_march_members 
+WHERE ([member_name] = 'Kay Kay Kay' OR 
+[member_name] = 'Moorish Fascist')")
+
+# Check what the messages look like without the relationship
+im_messages_2016_excluding <-
+sqldf("SELECT msg_sender_name, msg_receiver_name, msg_date_half, COUNT(msg_thread_id) as freq_messages
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2016.1' OR 
+[msg_date_half] = '2016.2')
+AND NOT ([msg_sender_name] = 'Kay Kay Kay' AND 
+[msg_receiver_name] = 'Moorish Fascist' OR 
+[msg_sender_name] = 'Moorish Fascist' AND 
+[msg_receiver_name] = 'Kay Kay Kay')
+GROUP BY msg_sender_name, msg_receiver_name, msg_date_half
+ORDER BY freq_messages DESC")
+im_messages_2016_excluding
+
+# All below 2.03% share of messages with the exchange between Kay Kay Kay and Moorish Fascist
+# 3257 messages
+im_messages_2016_excluding %>%
+  mutate(Freq = formattable::percent(freq_messages/sum(freq_messages)))
+
+median(im_messages_2016_excluding$freq_messages) #2 when we remove these two nodes
+mean(im_messages_2016_excluding$freq_messages) #2 when we remove these two nodes
+
+# Filled Density Plot
+d <- density(im_messages_2016_excluding$freq_messages)
+plot(d, main="Distribution of Messages in 2016 (excluding Moorish Fascists and Kay Kay Kay")
+polygon(d, col="red", border="blue")
+
+```
+
+# Other private messages in 2016
+
+```{r}
+# Take a look at Odin messages to other members
+sqldf("SELECT*
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2016.1'
+OR [msg_date_half] = '2016.2')
+AND [msg_sender_name] = 'Odin'
+ORDER BY msg_date")
+
+sqldf("SELECT msg_receiver_name, COUNT(msg_receiver_name) as receiver
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2016.1'
+OR [msg_date_half] = '2016.2')
+AND [msg_sender_name] = 'Odin'
+group by msg_receiver_name
+ORDER BY receiver desc")
+
+sqldf("SELECT*
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2016.1'
+OR [msg_date_half] = '2016.2')
+AND ([msg_sender_name] = 'Odin' AND 
+[msg_receiver_name] = 'Darkstar' OR 
+[msg_sender_name] = 'Darkstar' AND 
+[msg_receiver_name] = 'Odin')
+ORDER BY msg_date")
+
+```
+# Other private messages in 2016
+```{r}
+sqldf("SELECT*
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2016.1'
+OR [msg_date_half] = '2016.2')
+AND [msg_sender_name] = 'Александр Славрос'
+ORDER BY msg_date")
+
+sqldf("SELECT msg_receiver_name, COUNT(msg_receiver_name) as receiver
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2016.1'
+OR [msg_date_half] = '2016.2')
+AND [msg_sender_name] = 'Александр Славрос'
+group by msg_receiver_name
+ORDER BY receiver desc")
+
+sqldf("SELECT*
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2016.1'
+OR [msg_date_half] = '2016.2')
+AND ([msg_sender_name] = 'Александр Славрос' AND 
+[msg_receiver_name] = 'Teliavelis' OR 
+[msg_sender_name] = 'Teliavelis' AND 
+[msg_receiver_name] = 'Александр Славрос')
+ORDER BY msg_date")
+
+```
+
+# Blackshirt 13 and Xav private messages in 2016
+
+```{r}
+# Take a look at these two members' messages to other members
+im_messages_2016_exchange_2 <-
+sqldf("SELECT*
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2016.1'
+OR [msg_date_half] = '2016.2')
+AND ([msg_sender_name] = 'Blackshirt 13' AND 
+[msg_receiver_name] = 'Xav' OR 
+[msg_sender_name] = 'Xav' AND 
+[msg_receiver_name] = 'Blackshirt 13')
+ORDER BY msg_date")
+
+# Lots of exchange between members	 - 261 messages between the two members
+# Exchange makes up 6.16% of all messages sent in 2016
+
+sqldf("SELECT msg_thread_title, msg_text, msg_date, msg_sender_name, msg_post_id
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2016.1'
+OR [msg_date_half] = '2016.2')
+AND ([msg_sender_name] = 'Blackshirt 13' AND 
+[msg_receiver_name] = 'Xav' OR 
+[msg_sender_name] = 'Xav' AND 
+[msg_receiver_name] = 'Blackshirt 13')
+ORDER BY msg_date")
+
+# 3 threads - 2 started by Xav and 1 by Blackshirt 13
+sqldf("SELECT*
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2016.1'
+OR [msg_date_half] = '2016.2')
+AND ([msg_sender_name] = 'Blackshirt 13' AND 
+[msg_receiver_name] = 'Xav' OR 
+[msg_sender_name] = 'Xav' AND 
+[msg_receiver_name] = 'Blackshirt 13')
+GROUP BY msg_thread_title")
+
+#Blackshirt 13	2015-04-12 20:53:08	2017-06-08 16:27:43	Iron March Member	
+#Xav	2015-05-11 02:18:08	2017-11-20 19:35:57	AWD Recruiter
+# New members in 2015.2 and 2016.1 (Xav is an AWD Recruiter)
+
+sqldf("SELECT member_name, member_joined, member_last_activity_date, member_role
+FROM iron_march_members 
+WHERE ([member_name] = 'Blackshirt 13' OR 
+[member_name] = 'Xav')")
+
+# Check what the messages look like without the relationship
+im_messages_2016_excluding_2 <-
+sqldf("SELECT msg_sender_name, msg_receiver_name, msg_date_half, COUNT(msg_thread_id) as freq_messages
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2016.1' OR 
+[msg_date_half] = '2016.2')
+AND NOT([msg_sender_name] = 'Blackshirt 13' AND 
+[msg_receiver_name] = 'Xav' OR 
+[msg_sender_name] = 'Xav' AND 
+[msg_receiver_name] = 'Blackshirt 13')
+GROUP BY msg_sender_name, msg_receiver_name, msg_date_half
+ORDER BY freq_messages DESC")
+im_messages_2016_excluding
+
+# All below 2.03% share of messages with the exchange between Kay Kay Kay and Moorish Fascist
+# 3257 messages
+im_messages_2016_excluding_2 %>%
+  mutate(Freq = formattable::percent(freq_messages/sum(freq_messages)))
+
+median(im_messages_2016_excluding_2$freq_messages) #2 when we remove these two nodes
+mean(im_messages_2016_excluding_2$freq_messages) #2 when we remove these two nodes
+
+# Filled Density Plot
+d <- density(im_messages_2016_excluding_2$freq_messages)
+plot(d, main="Distribution of Messages in 2016 (excluding Moorish Fascists and Kay Kay Kay")
+polygon(d, col="red", border="blue")
+
+```
+
+# Posts
+
+1) Increase in posts in 2016 
+
+```{r}
+
+colnames(iron_march_comments_posts)
+
+# Remove NAs
+iron_march_comments_posts_nas <- na.omit(iron_march_comments_posts)
+
+# Howe many posts were created in 2016? 
+#2016.2	14431			
+#2016.1	15950
+	
+sqldf("SELECT post_date_half,
+COUNT(post_id) as post_count
+FROM iron_march_comments_posts_nas 
+WHERE  [post_class] LIKE '%Post%' 
+AND ([post_date_half] = '2016.1' OR
+[post_date_half] = '2016.2')
+GROUP BY post_date_half
+ORDER BY post_date_created DESC")
+
+
+# Most Popular Posts in 2016
+top_posts_2016.1 <- sqldf("SELECT DISTINCT post_title,
+COUNT(post_id) as post_count
+FROM iron_march_comments_posts_nas 
+WHERE  [post_class] LIKE '%Post%' 
+AND ([post_date_half] = '2016.1' OR
+[post_date_half] = '2016.2')
+GROUP BY post_title
+ORDER BY post_count DESC
+LIMIT 10
+")
+
+# Plot top messagers in 2016
+
+top_posts_2016.1 %>% 
+  mutate(post_title = fct_reorder(post_title, post_count)) %>%
+  ggplot( aes(x=post_title, y=post_count)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    coord_flip() +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Top 10 Posts With Most Comments in 2016") +
+  xlab("Post Title") + ylab("Frequency of Comments")  +
+geom_label(
+    aes(label=post_count), 
+    nudge_x = 0, nudge_y = 15, 
+    check_overlap = T,
+    size = 3)
+
+# Who has the lion's share in terms of overall % of messages in 2016?
+
+sqldf("SELECT DISTINCT post_title, post_author_name, COUNT(post_id) as post_count, post_date_half
+FROM iron_march_comments_posts_nas 
+WHERE  [post_class] LIKE '%Post%' 
+AND ([post_date_half] = '2016.1' OR 
+[post_date_half] = '2016.2')
+GROUP BY post_title
+ORDER BY post_count DESC")
+
+# show increase in comments
+
+comments_increase_2016 <- 
+sqldf("SELECT DISTINCT post_title, COUNT(post_id) as post_count, post_date_half
+FROM iron_march_comments_posts_nas 
+WHERE  [post_class] LIKE '%Post%' 
+AND ([post_date_half] = '2016.1' OR
+[post_date_half] = '2016.2')
+GROUP BY post_title
+HAVING post_count >150
+ORDER BY post_count DESC")
+
+
+comments_increase_2016 %>% 
+  mutate(post_title = fct_reorder(post_title, post_count)) %>%
+  ggplot( aes(x=post_title, y=post_count)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    xlab("") +
+    theme_bw() + 
+geom_label(
+    aes(label=post_count), 
+    nudge_x = 0, nudge_y = 15, 
+    check_overlap = T,
+    size = 3) +
+    facet_wrap(~post_date_half, scale="fixed") +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x=element_blank())  
+
+```
+# Trivial HAPPENINGS & TRUMP Posts 
+```{r}
+# ------> General Data <----------
+
+trivial_haps <- 
+sqldf("SELECT post_author_name, post_title, post_date_half, post_date_created, post_comment_id, comment_text, comment_author_name
+FROM iron_march_comments_posts_nas 
+WHERE  [post_class] LIKE '%Post%' 
+AND [post_title] = 'Trivial HAPPENINGs'
+GROUP BY post_author_name, post_title, post_date_half, post_date_created, post_comment_id, comment_text, comment_author_name
+ORDER BY post_date_created")
+
+members_uniq <- unique(trivial_haps$comment_author_name)
+length(members_uniq) # 295
+comments_uniq <- unique(trivial_haps$comment_text)
+length(comments_uniq) # 8442
+
+write.csv(trivial_haps,"trivial_haps.csv", row.names = FALSE)
+
+library(dplyr)
+# Plot activity 
+th_count <- trivial_haps %>%
+  group_by(post_date_half) %>%
+  dyplr::summarise(n = n())
+
+th_count$post_date_half <- as.factor(th_count$post_date_half) # change to factor
+
+th_count %>%  
+  ggplot( aes(x=post_date_half, y=n)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Activity on Trivial HAPPENINGs Post") +
+  xlab("Year and Half") + ylab("Number of Comments") +
+geom_label(
+    aes(label=n), 
+    nudge_x = 0, nudge_y = 15, 
+    check_overlap = T,
+    size = 3) 
+
+# ------> 2016 Data <----------
+
+Trivial_HAPPENINGs_2016 <- 
+sqldf("SELECT post_author_name, post_title, post_date_half, post_date_created, post_comment_id, comment_text, comment_author_name
+FROM iron_march_comments_posts_nas 
+WHERE  [post_class] LIKE '%Post%' 
+AND [post_date_half] = '2016.1'
+OR [post_date_half] = '2016.2'
+AND [post_title] = 'Trivial HAPPENINGs'
+GROUP BY post_author_name, post_title, post_date_half, post_date_created, post_comment_id, comment_text, comment_author_name
+ORDER BY post_date_created")
+
+#write.csv(Trivial_HAPPENINGs_2016,"Trivial_HAPPENINGs_2016.csv", row.names = FALSE)
+```
+
+```{r}
+# ------> General Data TRUMP Post <----------
+
+TRUMP <- 
+sqldf("SELECT post_author_name, post_title, post_date_half, post_date_created, post_comment_id, comment_text, comment_author_name
+FROM iron_march_comments_posts_nas 
+WHERE  [post_class] LIKE '%Post%' 
+AND [post_title] = 'TRUMP'
+GROUP BY post_author_name, post_title, post_date_half, post_date_created, post_comment_id, comment_text, comment_author_name
+ORDER BY post_date_created")
+
+na_members_uniq <- unique(TRUMP$comment_author_name)
+length(na_members_uniq) # 111
+na_comments_uniq <- unique(TRUMP$comment_text)
+length(na_comments_uniq) # 572
+
+#write.csv(TRUMP,"TRUMP.csv", row.names = FALSE)
+
+# Plot thread actitiy 
+TRUMP_a_count <- TRUMP %>%
+  group_by(post_date_half) %>%
+  dplyr::summarise(n = n())
+
+TRUMP_a_count$post_date_half <- as.factor(TRUMP_a_count$post_date_half) # change to factor
+
+TRUMP_a_count %>%  
+  ggplot( aes(x=post_date_half, y=n)) +
+    geom_bar(stat="identity", alpha=.6, width=.4) +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Activity on TRUMP Post") +
+  xlab("Year and Half") + ylab("Number of Comments") +
+geom_label(
+    aes(label=n), 
+    nudge_x = 0, nudge_y = 15, 
+    check_overlap = T,
+    size = 3) 
+```
+
+```{r}
+
+iron_march_comments_posts_nas <- na.omit(iron_march_comments_posts)
+
+#colnames(iron_march_comments_posts_nas)
+
+# 4231 messages sent in 2016
+sqldf("SELECT COUNT(msg_text) as mention
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2016.1'
+OR [msg_date_half] = '2016.2')")
+
+# Trump = 21 (>0.001%)
+# Brexit = 1 (>0.001%)
+# Slavros = 69
+# National Action = 99 (0.025)
+# AWD = 127 (0.03%)
+# Without capturing sentiment of the messages
+
+sqldf("SELECT msg_date_half, COUNT(msg_text) as mention
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2016.1'
+OR [msg_date_half] = '2016.2'
+OR [msg_date_half] = '2015.1'
+OR [msg_date_half] = '2015.2')
+AND ([msg_text] lIKE '%Slavros%' 
+OR  [msg_text] lIKE '%slavros%'
+OR  [msg_text] lIKE '%SLAVROS%')
+GROUP BY msg_date_half
+ORDER BY msg_date_half")
+
+
+# 30,524	comments in 2016
+sqldf("SELECT COUNT(comment_text) as mention
+FROM iron_march_comments_posts_nas 
+WHERE ([post_date_half] = '2016.1'
+OR [post_date_half] = '2016.2')")
+
+# Trump = 575 (0.02%)
+# Brexit = 48 (<0.001%)
+# Slavros = 130 (<0.001%)
+# National Action = 169 (0.01%)
+# AWD = 111 (<0.001%)
+# Without capturing sentiment of the messages
+
+sqldf("SELECT post_date_half, COUNT(comment_text) as mention
+FROM iron_march_comments_posts_nas 
+WHERE ([post_date_half] = '2016.1'
+OR [post_date_half] = '2016.2'
+OR [post_date_half] = '2015.1'
+OR [post_date_half] = '2015.2')
+AND ([comment_text] lIKE '%awd%' 
+OR  [comment_text] lIKE '%AWD%'
+OR  [comment_text] lIKE '%Atomwaffen%')
+GROUP BY post_date_half
+ORDER BY post_date_half")
+
+messages_top_mentions_2016 <- data.frame (keyword = c("Trump", "Brexit", "Slavros", "National Action", "Atomwaffen Division"),
+                                  mentions = c(21, 1, 69, 99, 137))
+
+messages_top_mentions_2016 %>% 
+  mutate(keyword = fct_reorder(keyword, mentions)) %>%
+  ggplot(aes(x=keyword, y=mentions)) +
+    geom_bar(stat="identity", position="dodge", alpha=.6, width=.4) +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Number of mentions of keywords in messages") +
+  xlab("Simulation") + ylab("Number of Nodes Adopting Rumour")  +
+  labs(fill = "Time Steps") +
+geom_label(
+    aes(label=mentions), 
+    nudge_x = 0, nudge_y = 10, 
+    size = 3, fill = "white")
+
+key_2016_mentions <- read.csv("2016_mentions.csv", sep =',', header = TRUE) # Posts and comments
+
+key_2016_mentions%>% 
+  ggplot(aes(x=keyword, y=mention, fill = keyword)) +
+    geom_bar(stat="identity", position="dodge", alpha=.6, width=.4) +
+    xlab("") +
+    theme_bw() + 
+   coord_flip() +
+  theme(legend.position="none") +
+  ggtitle("Mentions of Key Events in Comments and Messages", subtitle = "Mentions in year 2015 and 2016") +
+  xlab("Event") + ylab("Number of Mentions of Event")  +
+    facet_wrap(~year)
+
+```
+
+```{r}
+sqldf("SELECT msg_text
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2016.1'
+OR [msg_date_half] = '2016.2')
+AND ([msg_text] lIKE '%national action%' 
+OR  [msg_text] lIKE '%National Action%')
+ORDER BY msg_date")
+
+sqldf("SELECT*
+FROM iron_march_private_messages_nas 
+WHERE ([msg_date_half] = '2016.1'
+OR [msg_date_half] = '2016.2')
+AND ([msg_text] lIKE '%awd%' 
+OR  [msg_text] lIKE '%AWD%'
+OR  [msg_text] lIKE '%Atomwaffen%'
+OR  [msg_text] lIKE '%waffen%')
+ORDER BY msg_date")
+```
+
+# Complex Contagion Result
+
+```{r}
+
+rumour_simulations <- data.frame (simulation = c("Slavros", "Terrorist", "Moderators", "Central Nodes"),
+                                  infected = c(121, 135, 100, 135),
+                  time = c(7,8,9,5))
+
+rumour_simulations %>% 
+  mutate(simulation = fct_reorder(simulation, infected)) %>%
+  ggplot(aes(x=simulation, y=infected, fill = time)) +
+    geom_bar(stat="identity", position="dodge", alpha=.6, width=.4) +
+    xlab("") +
+    theme_bw() + 
+  ggtitle("Number of Nodes Adopting Rumour by Time Steps per Simulation") +
+  xlab("Simulation") + ylab("Number of Nodes Adopting Rumour")  +
+  labs(fill = "Time Steps") +
+geom_label(
+    aes(label=infected), 
+    nudge_x = 0, nudge_y = 10, 
+    size = 3, fill = "white") 
+
+```
+
+## ANY CHANGE BEFORE AND AFTER TRUMP ELECTION?
+
+```{r}
+iron_march_edges_ids_prep_2016 <- iron_march_edges_ids_prep
+iron_march_edges_ids_prep_2016$newdate <- as.Date(iron_march_edges_ids_prep_2016$timestamp, "GMT")
+iron_march_edges_ids_prep_2016$newdate <- as.character(iron_march_edges_ids_prep_2016$newdate)
+
+weeks_before_trump <- 
+sqldf("SELECT*
+FROM iron_march_edges_ids_prep_2016 
+WHERE [newdate] BETWEEN '2016-08-07' AND '2016-11-07' 
+")
+
+weeks_after_trump <- 
+sqldf("SELECT*
+FROM iron_march_edges_ids_prep_2016 
+WHERE [newdate] BETWEEN '2016-11-08' AND '2017-02-08' 
+")
+
+twoweeks_before_trump <- 
+sqldf("SELECT*
+FROM iron_march_edges_ids_prep_2016 
+WHERE [newdate] BETWEEN '2016-10-21' AND '2016-11-07' 
+")
+
+twoweeks_after_trump <- 
+sqldf("SELECT*
+FROM iron_march_edges_ids_prep_2016 
+WHERE [newdate] BETWEEN '2016-11-08' AND '2016-11-22' 
+")
+
+```
+
+```{r}
+#120 days
+trump_nodes_list_before <-graph.data.frame(weeks_before_trump)
+plot(trump_nodes_list_before)
+my_adjacency_matrix_before <-get.adjacency(trump_nodes_list_before)
+trump_network_before <-graph.adjacency(my_adjacency_matrix_before)
+V(trump_network_before)$degree<-degree(trump_network_before)
+
+length(V(trump_network_before)) #804 nodes
+length(E(trump_network_before)) #8857
+
+#14 days
+trump_nodes_list_before_days <-graph.data.frame(twoweeks_before_trump)
+plot(trump_nodes_list_before_days)
+my_adjacency_matrix_before_days <-get.adjacency(trump_nodes_list_before_days)
+trump_network_before_days <-graph.adjacency(my_adjacency_matrix_before_days)
+V(trump_network_before_days)$degree<-degree(trump_network_before_days)
+
+length(V(trump_network_before_days)) #263 nodes
+length(E(trump_network_before_days)) #1743
+
+library(tidyverse)
+library(tidygraph)
+library(ggraph)
+
+only_cool_folks_tidy <- as_tbl_graph(trump_network_before)
+
+ggraph(trump_network_before, layout = 'kk', maxiter = 100) + 
+  geom_node_point(aes(size = degree)) + 
+  scale_size(range = c(2,10)) +
+  geom_edge_link(alpha = 0.25) +
+  #geom_node_text(aes(label = name), repel = TRUE) +
+  theme_graph()
+
+
+#delete.vertices(trump_network_before,c('6156','1951','5682' ))
+```
+```{r}
+#120 days
+trump_nodes_list_after <-graph.data.frame(weeks_after_trump)
+plot(trump_nodes_list_after)
+my_adjacency_matrix_after <-get.adjacency(trump_nodes_list_after)
+trump_network_after<-graph.adjacency(my_adjacency_matrix_after)
+V(trump_network_after)$degree<-degree(trump_network_after)
+
+length(V(trump_network_after)) #749 nodes
+length(E(trump_network_after)) #7835 edges
+
+#14 days
+trump_nodes_list_after_days <-graph.data.frame(twoweeks_after_trump)
+plot(trump_nodes_list_after_days)
+my_adjacency_matrix_after_days <-get.adjacency(trump_nodes_list_after_days)
+trump_network_after_days<-graph.adjacency(my_adjacency_matrix_after_days)
+V(trump_network_after_days)$degree<-degree(trump_network_after_days)
+
+length(V(trump_network_after_days)) #749 nodes
+length(E(trump_network_after_days)) #1407 edges
+
+library(tidyverse)
+library(tidygraph)
+library(ggraph)
+
+only_cool_folks_tidy <- as_tbl_graph(trump_network_after)
+
+ggraph(trump_network_after, layout = 'kk', maxiter = 100) + 
+  geom_node_point(aes(size = degree)) + 
+  scale_size(range = c(2,10)) +
+  geom_edge_link(alpha = 0.25) +
+  #geom_node_text(aes(label = name), repel = TRUE) +
+  #geom_edge_fan(aes(color = from)) +
+  theme_graph()
+
+```
+
+```{r}
+#120 days
+trump_before_degree <- degree(trump_network_before) #0.397445
+trump_before_density <- edge_density(trump_network_before, loops=F) # 0.397445
+trump_before_cent <- centralization.degree(trump_network_before, mode = "all") # 0.1815988
+
+centralization.betweenness(trump_network_before, directed = TRUE) # 0.001040457
+trump_before_btw <- betweenness(trump_network_before, directed = TRUE)
+
+trump_before_diam <- diameter(trump_network_before, directed=T) # 3
+trump_before_dist <- mean_distance(trump_network_before) # 1.248109
+
+centralization.degree(trump_network_before, mode = "in") # 0.397445
+trump_before_indegree <- degree(trump_network_before, mode = "in")
+
+centralization.degree(trump_network_before, mode = "out") #0.006861979
+trump_before_outdegree <- degree(trump_network_before, mode = "out")
+
+wtc <- cluster_walktrap(trump_network_before)
+modularity(wtc)
+trump_before_mod <- modularity(trump_network_before, membership(wtc)) # 0.1563072
+
+# 120 days after - iron_march_network_after_trump
+trump_after_degree <- degree(trump_network_after) # 0.0365173
+trump_after_density <- edge_density(trump_network_after, loops=F) # 0.03115303
+trump_after_cent <- centralization.degree(trump_network_after, mode = "all") # 0.003628369
+
+centralization.betweenness(trump_network_after, directed = TRUE) # 0.007681703
+trump_after_btw <- betweenness(trump_network_after, directed = TRUE)
+
+trump_after_diam <- diameter(trump_network_after, directed=T) # 5
+trump_after_dist <- mean_distance(trump_network_after) # 1.864372
+
+centralization.degree(trump_network_after, mode = "in") # 0.3150008
+trump_after_indegree <- degree(trump_network_after, mode = "in")
+
+centralization.degree(trump_network_after, mode = "out") #0.006190599
+trump_after_outdegree <- degree(trump_network_after, mode = "out")
+
+wtc <- cluster_walktrap(trump_network_after)
+modularity(wtc)
+trump_after_mod <- modularity(trump_network_after, membership(wtc)) # 0.3221796
+
+```
+```{r}
+#14 days beofre
+degree(trump_network_before_days) #
+edge_density(trump_network_before_days, loops=F) # 
+centralization.degree(trump_network_before_days, mode = "all") # 
+centralization.degree(trump_network_before_days, mode = "in") # 
+centralization.degree(trump_network_before_days, mode = "out") 
+centralization.betweenness(trump_network_before_days, directed = TRUE) # 
+diameter(trump_network_before_days, directed=T) # 3
+
+wtc <- cluster_walktrap(trump_network_before_days)
+modularity(wtc)
+trump_before_mod <- modularity(trump_network_before_days, membership(wtc)) # 
+
+# 14 days after after
+degree(trump_network_after_days) 
+edge_density(trump_network_after_days, loops=F) # 
+centralization.degree(trump_network_after_days, mode = "all") # 
+centralization.degree(trump_network_after_days, mode = "in") # 
+centralization.degree(trump_network_after_days, mode = "out") 
+centralization.betweenness(trump_network_after_days, directed = TRUE) # 
+diameter(trump_network_after_days, directed=T) # 5
+mean_distance(trump_network_after_days) # 1.864372
+
+wtc <- cluster_walktrap(trump_network_after_days)
+modularity(wtc)
+trump_after_mod <- modularity(trump_network_after_days, membership(wtc)) # 0.3221796
+
+```
+
+# T TESTS
+
+Not normally distributed so we use the Wilcox Test. If the p-value of the test is < 0.05, which is less than the significance level alpha = 0.05, we can conclude that the metric of the network before is significantly different from the metric after treatment with a p-value.
+
+burt - https://ruqinren.wordpress.com/2018/03/01/hand-calculation-of-burts-constraint-in-networks/
+
+```{r}
+#Degree Test
+degree_dif<-trump_after_degree-trump_before_degree
+
+mean(trump_before_degree) # 22.03234
+sd(trump_before_degree) # 13.21329
+
+mean(trump_after_degree) # 20.92123
+sd(trump_after_degree) # 42.29446
+
+mean(degree_dif) # 2.732587
+sd(degree_dif) # 62.89549
+
+# Kolmogorov-Smirnov Test
+#D = 0.48732, p-value < 2.2e-166 (< .05 = non-normal)
+ks.test(degree_dif, 'pnorm') 
+
+# W = 299586, p-value = 0.8638 (p > 0.05) 
+degree_test <- wilcox.test(trump_before_degree, trump_after_degree, paired = FALSE)
+degree_test
+
+```
+```{r}
+#out and in Test
+
+out_dif<-trump_after_outdegree-trump_before_outdegree
+
+mean(trump_before_outdegree) # 11.01617
+sd(trump_before_outdegree) # 36.25197
+mean(trump_after_outdegree) # 10.46061
+sd(trump_after_outdegree) # 33.38157
+mean(degree_dif) # 2.732587
+sd(degree_dif) # 2.077054
+
+# Kolmogorov-Smirnov Test
+#D = 0.48732, p-value < 2.2e-166 (< .05 = non-normal)
+ks.test(degree_dif, 'pnorm') 
+
+# W = 291004, p-value = 0.1946 (p > 0.05) 
+outtest <- wilcox.test(trump_before_outdegree, trump_after_outdegree, paired = FALSE)
+outtest
+
+#-----------> in <------------
+
+in_dif<-trump_after_indegree-trump_before_indegree
+
+mean(trump_before_indegree) #11.01617
+sd(trump_before_indegree) # 30.80572
+mean(trump_after_indegree) # 10.46061
+sd(trump_after_indegree) # 22.80128
+mean(degree_dif) # 2.732587
+sd(degree_dif) # 2.077054
+
+# Kolmogorov-Smirnov Test
+#D = 0.22725, p-value = 1.331e-07 (< .05 = non-normal)
+ks.test(in_dif, 'pnorm') 
+
+# W = 315944, p-value = 0.08994 (p > 0.05) 
+intest <- wilcox.test(trump_before_indegree, trump_after_indegree, paired = FALSE)
+intest
+
+#t = -0.92027, df = 315, p-value = 0.3581
+#t.test(trump_after_indegree, trump_before_indegree,var.equal = T)
+```
+
+```{r}
+#Centrality Test
+
+cent_dif<-trump_after_cent-trump_before_cent
+
+mean(trump_before_cent) # 0.2505732
+sd(trump_before_degree) # 2.567419
+
+median(trump_after_degree) # 0.2057991
+sd(trump_after_degree) # 2.096922
+
+mean(degree_dif) # -0.04477411
+sd(degree_dif) # 2.077054
+
+# Kolmogorov-Smirnov Test
+#D = 0.48732, p-value < 2.2e-166 (< .05 = non-normal)
+ks.test(degree_dif, 'pnorm') 
+
+# W = 13150, p-value = 0.4682 (p > 0.05) 
+centtest <- wilcox.test(trump_before_cent, trump_after_cent, paired = FALSE)
+centtest
+
+#t = 1.3967, df = 315, p-value = 0.1635
+t.test(trump_before_degree, trump_after_degree,var.equal = T)
+
+```
+
+```{r}
+#Betweenness Test
+
+between_dif<-trump_after_btw -trump_before_btw  #-63.95517
+
+mean(between_dif) # 
+sd(between_dif) #  
+mean(trump_before_btw) # 305.0187
+sd(trump_before_btw) # 1761.704
+mean(trump_after_btw ) # 147.4259
+sd(trump_after_btw ) # 961.437
+
+# Kolmogorov-Smirnov Test
+#  D = 0.46875, p-value < 2.2e-16 (< .05 = non-normal)
+ks.test(between_dif, 'pnorm') 
+
+#W = 311710, p-value = 0.04923
+betweenness_test <- wilcox.test(trump_before_btw, trump_after_btw, paired = FALSE)
+betweenness_test
+```

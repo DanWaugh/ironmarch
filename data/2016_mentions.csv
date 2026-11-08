@@ -1,0 +1,35 @@
+﻿edge,keyword,year,half,mention
+Comment,Slavros,2015,2015.1,115
+Comment,Slavros,2015,2015.2,117
+Comment,Slavros,2016,2016.1,68
+Comment,Slavros,2016,2016.2,62
+Comment,Trump,2015,2015.1,11
+Comment,Trump,2015,2015.2,134
+Comment,Trump,2016,2016.1,269
+Comment,Trump,2016,2016.2,306
+Comment,National Action,2015,2015.1,61
+Comment,National Action,2015,2015.2,28
+Comment,National Action,2016,2016.1,58
+Comment,National Action,2016,2016.2,111
+Comment,Brexit,2016,2016.1,27
+Comment,Brexit,2016,2016.2,21
+Comment,Atomwaffen Division,2015,2015.1,6
+Comment,Atomwaffen Division,2015,2015.2,29
+Comment,Atomwaffen Division,2016,2016.1,55
+Comment,Atomwaffen Division,2016,2016.2,56
+Message,Atomwaffen Division,2015,2015.1,2
+Message,Atomwaffen Division,2015,2015.2,8
+Message,Atomwaffen Division,2016,2016.1,79
+Message,Atomwaffen Division,2016,2016.2,48
+Message,Trump,2015,2015.2,1
+Message,Trump,2016,2016.1,13
+Message,Trump,2016,2016.2,8
+Message,Brexit,2016,2016.1,1
+Message,National Action,2015,2015.1,9
+Message,National Action,2015,2015.2,4
+Message,National Action,2016,2016.1,55
+Message,National Action,2016,2016.2,44
+Message,Slavros,2015,2015.1,22
+Message,Slavros,2015,2015.2,34
+Message,Slavros,2016,2016.1,19
+Message,Slavros,2016,2016.2,50
